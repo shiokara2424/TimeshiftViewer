@@ -172,6 +172,8 @@ local function go_live()
   local pos = mp.get_property_number('time-pos') or 0
   if se > pos then mp.commandv('seek', tostring(se), 'absolute') end
   on_back_to_live('ライブに戻りました')
+  -- 本体に知らせる（シミュレーターを閉じる）。自然に追いついたときは送らない
+  mp.commandv('script-message', 'tsv-live')
 end
 
 -- 絶対位置へシーク。実際のシーク先を返す（ライブに戻った場合は nil）

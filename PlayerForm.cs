@@ -93,6 +93,8 @@ namespace TimeshiftViewer
             ipc.ClientMessage += (name, args) =>
             {
                 if (name == "tsv-sim") UI(ToggleSim);
+                // LIVE に戻したらシミュレーターを閉じる（再生状態は戻さず、ライブ再生のまま）
+                else if (name == "tsv-live") UI(() => { if (sim != null && sim.Visible) { pausedBeforeSim = null; HideSim(); } });
                 else if (name.StartsWith("tsv-")) UI(() => PlayerMessage?.Invoke(name, args));
             };
         }
@@ -225,6 +227,8 @@ namespace TimeshiftViewer
             if (sim != null && sim.Visible && sim.ContainsFocus)
             {
                 if (keyData == Keys.T) { HideSim(); return true; }
+                // シミュレーターで使わない End（ライブへ）・Home（最古へ）はプレーヤーへ
+                if ((keyData == Keys.End || keyData == Keys.Home) && ipc != null) { ipc.Send("keypress", keyData == Keys.End ? "END" : "HOME"); return true; }
                 // ウィンドウ宛てに届いたキーは子の ProcessCmdKey を通らないので、ここで渡す
                 if (msg.HWnd == Handle && sim.HandleKey(keyData)) return true;
                 return base.ProcessCmdKey(ref msg, keyData);
