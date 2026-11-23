@@ -36,15 +36,17 @@ end
 local PEN_COLORS = {
   { name = '赤',   c = '3C3CFF' },
   { name = '黄',   c = '00E6FF' },
-  { name = '水色', c = 'FFD000' },
+  { name = '青',   c = 'FF5020' },   -- 原色に近い青（R30 G80 B255）
   { name = '緑',   c = '40E040' },
   { name = '紫',   c = 'F050B4' },
   { name = '白',   c = 'FFFFFF' },
 }
-local PEN_WIDTH = 0.0065      -- 線の太さ（映像の高さに対する割合）
+local PEN_WIDTH = 0.0065      -- 線の太さ（映像の高さに対する割合）。太いほうはこの3倍
+local PEN_WIDTHS = { { n = 1, name = '細' }, { n = 3, name = '太' } }
 pen = {
   on = false,       -- ペンモード
   color = 1,
+  width = 1,        -- 線の太さの倍率（1 か 3）
   strokes = {},     -- { color = n, pts = { {u, v}, ... } }  座標は映像に対する 0〜1
   cur = nil,        -- 描いている途中の線
 }
@@ -82,7 +84,7 @@ local function pen_add_point(m)
 end
 
 local function pen_begin(m)
-  pen.cur = { color = pen.color, pts = {} }
+  pen.cur = { color = pen.color, w = pen.width, pts = {} }
   pen.strokes[#pen.strokes + 1] = pen.cur
   pen_add_point(m)
 end
@@ -113,6 +115,11 @@ mp.register_script_message('ts-pen-color', function(n)
   pen.color = n
   pen.on = true
   msg('ペン: ' .. PEN_COLORS[n].name)
+end)
+mp.register_script_message('ts-pen-width', function()
+  pen.width = (pen.width == 1) and 3 or 1
+  pen.on = true
+  msg('ペン: ' .. (pen.width == 1 and '細' or '太'))
 end)
 mp.register_script_message('ts-pen-undo', function()
   pen_end()
@@ -257,7 +264,7 @@ local function layout()
   L.buttons = defs
 
   -- ペンのパレット（ペンモード中だけ）
-  -- 画面中央、2つの盤面の間で NEXT 欄より下・勝利数／セット数より上の空いている所に2段で置く。
+  -- 画面中央、2つの盤面の間で NEXT 欄より下・勝利数／セット数より上の空いている所に3段（色・太さ・操作）で置く。
   -- 位置は映像の 1920×1080 基準（黒帯やウィンドウの大きさが変わってもずれない）
   if pen.on then
     local vx1, vy1, vx2, vy2 = video_rect()
@@ -269,13 +276,21 @@ local function layout()
     local cw, ch, g = math.floor(56 * k), math.floor(44 * k), math.floor(8 * k)
     local rowW = #PEN_COLORS * cw + (#PEN_COLORS - 1) * g
     local x0 = math.floor(VX(960) - rowW / 2)
-    local y0 = math.floor(VY(640) - ch - g / 2)          -- 上の段（色）。中心 y≈640（NEXT 欄の下端 ≈430、セット数のタブ ≈928）
+    local y0 = math.floor(VY(640) - (3 * ch + 2 * g) / 2)   -- 上の段（色）。中心 y≈640（NEXT 欄の下端 ≈430、セット数のタブ ≈928）
     for i = 1, #PEN_COLORS do
       local x = x0 + (i - 1) * (cw + g)
       items[#items + 1] = { kind = 'color', n = i, act = function() pen.color = i end, x1 = x, y1 = y0, x2 = x + cw, y2 = y0 + ch }
     end
+    -- 2段目: 太さ（細 / 太）
+    local ww = math.floor((rowW - g) / 2)
+    local yw = y0 + ch + g
+    for i, d in ipairs(PEN_WIDTHS) do
+      local x = x0 + (i - 1) * (ww + g)
+      items[#items + 1] = { kind = 'width', n = d.n, label = d.name, act = function() pen.width = d.n end, x1 = x, y1 = yw, x2 = x + ww, y2 = yw + ch }
+    end
+    -- 3段目: 戻す / 全消し / 終了
     local bw = math.floor((rowW - 2 * g) / 3)
-    local y1b = y0 + ch + g
+    local y1b = yw + ch + g
     local defs2 = {
       { kind = 'undo',  label = '戻す',   act = function() mp.commandv('script-message', 'ts-pen-undo') end },
       { kind = 'clear', label = '全消し', act = function() pen_clear(false) end },
@@ -389,7 +404,7 @@ local function draw_strokes(ev)
   local x1, y1, x2, y2 = video_rect()
   if not x1 then return end
   local vw, vh = x2 - x1, y2 - y1
-  local r = math.max(1, PEN_WIDTH * vh / 2)
+  local r0 = PEN_WIDTH * vh / 2
   for _, s in ipairs(pen.strokes) do
     local pts = s.pts
     if #pts > 0 then
@@ -405,6 +420,7 @@ local function draw_strokes(ev)
         path = 'm ' .. xy[1] .. ' l ' .. table.concat(xy, ' ', 2) .. ' ' .. table.concat(back, ' ')
       end
       local col = PEN_COLORS[s.color].c
+      local r = math.max(1, r0 * (s.w or 1))
       -- 下に黒い縁、上に色
       ev[#ev + 1] = string.format('{\\an7\\pos(0,0)\\shad0\\1a&HFF&\\3c&H000000&\\3a&H60&\\bord%.1f\\p1}%s{\\p0}', r + 2, path)
       ev[#ev + 1] = string.format('{\\an7\\pos(0,0)\\shad0\\1a&HFF&\\3c&H%s&\\3a&H00&\\bord%.1f\\p1}%s{\\p0}', col, r, path)
@@ -498,6 +514,17 @@ local function draw()
         if sel then ev[#ev + 1] = rect(it.x1 - bd, it.y1 - bd, it.x2 + bd, it.y2 + bd, 'FFFFFF', '00') end
         ev[#ev + 1] = rect(it.x1, it.y1, it.x2, it.y2, hot and '505050' or '202020', '00')
         ev[#ev + 1] = rect(it.x1 + ins, it.y1 + ins, it.x2 - ins, it.y2 - ins, PEN_COLORS[it.n].c, '00')
+      elseif it.kind == 'width' then
+        -- 太さ: 文字と、今の色でその太さの線の見本
+        local sel = (pen.width == it.n)
+        if sel then ev[#ev + 1] = rect(it.x1 - bd, it.y1 - bd, it.x2 + bd, it.y2 + bd, 'FFFFFF', '00') end
+        ev[#ev + 1] = rect(it.x1, it.y1, it.x2, it.y2, hot and '505050' or '202020', '00')
+        local th = math.max(2, PEN_WIDTH * 1080 * pk * it.n)
+        local cy = (it.y1 + it.y2) / 2
+        local lx1 = it.x1 + math.floor(48 * pk)
+        ev[#ev + 1] = rect(lx1, cy - th / 2 - 1, it.x2 - ins * 2, cy + th / 2 + 1, '000000', '40')
+        ev[#ev + 1] = rect(lx1 + 1, cy - th / 2, it.x2 - ins * 2 - 1, cy + th / 2, PEN_COLORS[pen.color].c, '00')
+        ev[#ev + 1] = text_at(it.x1 + math.floor(24 * pk), cy, 5, math.floor(22 * pk), 'FFFFFF', it.label)
       else
         local fill = hot and (it.kind == 'close' and '3A3ADD' or '606060') or '303030'
         ev[#ev + 1] = rect(it.x1, it.y1, it.x2, it.y2, fill, '10')
