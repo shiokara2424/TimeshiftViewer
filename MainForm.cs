@@ -34,7 +34,7 @@ namespace TimeshiftViewer
 
         public MainForm()
         {
-            Text = "Timeshift Viewer";
+            Text = "Timeshift Viewer " + AppInfo.Version;   // プレーヤーのウィンドウ名は OBS のキャプチャのため固定（番号を入れない）
             Font = new Font("Yu Gothic UI", 10f);
             BackColor = Color.White;
             FormBorderStyle = FormBorderStyle.FixedSingle;

@@ -38,6 +38,10 @@ TimeshiftViewer.exe (C#, .NET Framework 4.8, WinForms)
 | `Tests/` | ロジックと認識のテスト（下記） |
 | `samples/` | 認識の調整・テスト用の画像（1080p。`analysis_frame_sets.png` は実際の解析用出力 1520×880、`synthetic_go_numbers.jpg` は合成） |
 
+## バージョン
+- `TimeshiftViewer.csproj` の `<Version>`（メジャー.マイナー.パッチ）。設定画面のタイトルに表示（`AppInfo.Version`）。プレーヤーのウィンドウ名は OBS のため番号を入れない。
+- 変更点は CHANGELOG.md に書き、リリースごとに Git のタグ `vX.Y.Z` を付けてプッシュ（`git push --tags`）。
+
 ## ビルドと確認
 - `dotnet build -c Release`（Release ビルド後に exe をこのフォルダ直下＝実行用フォルダへコピーする。起動中だとコピーは警告になり失敗する）
 - テスト: `dotnet run --project Tests -c Release`（ツモ生成の正解データ・識別・連鎖・履歴・画像認識・対戦の検知）

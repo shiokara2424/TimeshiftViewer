@@ -15,6 +15,18 @@ namespace TimeshiftViewer
     // ------------------------------------------------------------
     //  パス
     // ------------------------------------------------------------
+    static class AppInfo
+    {
+        /// <summary>バージョン（csproj の Version。例 "1.1.0"）</summary>
+        public static readonly string Version = GetVersion();
+
+        static string GetVersion()
+        {
+            var v = Assembly.GetExecutingAssembly().GetName().Version;
+            return v == null ? "?" : $"{v.Major}.{v.Minor}.{v.Build}";
+        }
+    }
+
     static class Paths
     {
         public static string Base;

@@ -54,7 +54,7 @@ namespace TimeshiftViewer.Puyo
         bool syncing;
 
         // 連鎖アニメ（操作中の側だけ）
-        readonly Timer animTimer = new Timer { Interval = 380 };
+        readonly Timer animTimer = new Timer { Interval = 180 };   // 連鎖アニメの1コマ（消える前・消える瞬間）
         readonly Queue<(Field f, bool[,] hl, string cap)> anim = new Queue<(Field, bool[,], string)>();
         Side animSide;
 
@@ -100,10 +100,13 @@ namespace TimeshiftViewer.Puyo
             }
 
             // ---------- 本体: [1P] [情報・履歴] [2P] ----------
-            body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Padding = new Padding(10, 4, 10, 10) };
+            // 両端に余白を取り、2つの盤面を中央に寄せる: [余白] [1P] [情報・履歴（幅は ResizeBoards で決める）] [2P] [余白]
+            body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 5, RowCount = 1, Padding = new Padding(10, 4, 10, 10) };
+            body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
             body.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 440));
             body.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
 
             foreach (var sd in sides)
             {
@@ -117,7 +120,7 @@ namespace TimeshiftViewer.Puyo
                 if (sd.Index == 0) { sd.Box.Controls.Add(sd.View); sd.Box.Controls.Add(sd.Next); }
                 else { sd.Box.Controls.Add(sd.Next); sd.Box.Controls.Add(sd.View); }
                 col.Controls.Add(sd.Box);
-                body.Controls.Add(col, sd.Index == 0 ? 0 : 2, 0);
+                body.Controls.Add(col, sd.Index == 0 ? 1 : 3, 0);
 
                 var s2 = sd;
                 // 盤面や NEXT をクリックしたらその側を操作対象にする
@@ -184,11 +187,11 @@ namespace TimeshiftViewer.Puyo
             lblHelp = new Label
             {
                 AutoSize = true, ForeColor = Dim, Margin = new Padding(16, 0, 0, 0),
-                Text = "← → 移動　Z / X（↑）回転　↓ / Space 置く\nCtrl+Z 戻す　Ctrl+Y やり直し\nTab 1P/2P 切替　E 編集　R 連鎖　T ツモ"
+                Text = "← → 移動　Z / X（↑）回転\n↓ / Space 置く\nCtrl+Z 戻す　Ctrl+Y やり直し\nTab 1P/2P 切替　E 編集\nR 連鎖　T ツモ"
             };
             cmpRow.Controls.Add(lblHelp);
             mid.Controls.Add(cmpRow, 0, 5);
-            body.Controls.Add(mid, 1, 0);
+            body.Controls.Add(mid, 2, 0);
 
             Controls.Add(body);
             Controls.Add(palette);
@@ -234,15 +237,20 @@ namespace TimeshiftViewer.Puyo
             ResizeBoards();
         }
 
-        int lastCell = -1;
+        int lastCell = -1, lastCenterW = -1;
         void ResizeBoards()
         {
             if (sides[0].View == null) return;
             int top = bar.Height + (palette.Visible ? palette.Height : 0) + 50;
             int byH = (ClientSize.Height - top - 20) / 15;                         // 盤面は 15 行分（12段 + 13段目 + 上の2行）
-            int byW = (ClientSize.Width - 420) / (2 * 6 + 2 * 3);                  // 中央に 420px 残す。NEXT は盤面の約 3 マス分
+            // 中央（情報・履歴）の幅と両端の余白（それぞれ幅の 8% 以上）を残す。NEXT は盤面の約 3 マス分
+            int centerW = Math.Max(340, Math.Min(480, ClientSize.Width * 22 / 100));
+            if (body.ColumnStyles.Count == 5) body.ColumnStyles[2].Width = centerW;
+            int margins = ClientSize.Width * 16 / 100;
+            int byW = (ClientSize.Width - centerW - margins - 40) / (2 * 6 + 2 * 3);
             int cell = Math.Max(20, Math.Min(80, Math.Min(byH, byW)));
-            if (cell == lastCell) return;
+            if (cell == lastCell && centerW == lastCenterW) return;
+            lastCenterW = centerW;
             lastCell = cell;
             foreach (var sd in sides)
             {
