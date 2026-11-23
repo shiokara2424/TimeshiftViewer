@@ -1,0 +1,12 @@
+bin/
+obj/
+.vs/
+*.user
+# 実行時に生成されるもの
+tools/
+mpv-config/
+settings.ini
+ffmpeg-log.txt
+/TimeshiftViewer.exe
+screenshots/
+debug-layout.txt

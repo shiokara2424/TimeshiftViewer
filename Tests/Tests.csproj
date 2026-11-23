@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Puyo/ のロジックだけを確認するコンソール。実行方法は CLAUDE.md を参照 -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>PuyoTests</AssemblyName>
+    <RootNamespace>PuyoTests</RootNamespace>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(OS)' != 'Windows_NT' And Exists('/usr/lib/mono/4.8-api')">
+    <FrameworkPathOverride>/usr/lib/mono/4.8-api</FrameworkPathOverride>
+    <AutomaticallyUseReferenceAssemblyPackages>false</AutomaticallyUseReferenceAssemblyPackages>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\Puyo\Tsumo.cs" Link="Puyo\Tsumo.cs" />
+    <Compile Include="..\Puyo\Field.cs" Link="Puyo\Field.cs" />
+    <Compile Include="..\Puyo\SimState.cs" Link="Puyo\SimState.cs" />
+  </ItemGroup>
+</Project>

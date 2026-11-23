@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>TimeshiftViewer</AssemblyName>
+    <RootNamespace>TimeshiftViewer</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <Version>1.0.0</Version>
+    <Product>Timeshift Viewer</Product>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+  </PropertyGroup>
+  <!-- Linux でビルドする場合のみ: Mono の .NET Framework 4.8 参照アセンブリを使う（Windows では不要） -->
+  <PropertyGroup Condition="'$(OS)' != 'Windows_NT' And Exists('/usr/lib/mono/4.8-api')">
+    <FrameworkPathOverride>/usr/lib/mono/4.8-api</FrameworkPathOverride>
+    <AutomaticallyUseReferenceAssemblyPackages>false</AutomaticallyUseReferenceAssemblyPackages>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Tests/ は別プロジェクト -->
+    <Compile Remove="Tests\**" />
+    <None Remove="Tests\**" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Web.Extensions" />
+    <EmbeddedResource Include="mpvconf\mpv.conf" LogicalName="mpv.conf" />
+    <EmbeddedResource Include="mpvconf\input.conf" LogicalName="input.conf" />
+    <EmbeddedResource Include="mpvconf\timeshift.lua" LogicalName="timeshift.lua" />
+  </ItemGroup>
+  <!-- Release ビルド後、実行用フォルダ（tools / settings.ini があるこのフォルダ）へ exe をコピー -->
+  <Target Name="CopyExeToRoot" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(MSBuildProjectDirectory)" ContinueOnError="true" />
+  </Target>
+</Project>

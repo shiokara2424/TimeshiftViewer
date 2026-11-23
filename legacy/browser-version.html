@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>タイムシフト キャプチャビューア</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --accent:#ff3b4a; --fg:#f2f2f2; --dim:#9a9a9a; --panel:rgba(18,18,20,.92); }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:#000; color:var(--fg);
+    font-family:"Segoe UI","Hiragino Sans","Yu Gothic UI",Meiryo,sans-serif; overflow:hidden; }
+  #stage { position:fixed; inset:0; background:#000; }
+  #stage.idle { cursor:none; }
+  #live, #replay { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#000; }
+  #replay { display:none; }
+  #stage.replay #replay { display:block; }
+  #stage.replay #live { visibility:hidden; }
+
+  #badge { position:absolute; top:16px; left:16px; padding:4px 10px; border-radius:4px; font-weight:700;
+    font-size:14px; letter-spacing:.05em; background:var(--accent); color:#fff; transition:opacity .3s; }
+  #badge.replay { background:#2d6cdf; }
+  #badge.paused { background:#666; }
+  #stage.idle #badge.live { opacity:0; }
+
+  #controls { position:absolute; left:0; right:0; bottom:0; padding:28px 18px 14px;
+    background:linear-gradient(transparent, rgba(0,0,0,.85)); transition:opacity .3s; }
+  #stage.idle #controls { opacity:0; pointer-events:none; }
+  #seekRow { display:flex; align-items:center; gap:12px; }
+  #seek { flex:1; height:6px; -webkit-appearance:none; appearance:none; background:transparent; cursor:pointer; }
+  #seek::-webkit-slider-runnable-track { height:6px; border-radius:3px;
+    background:linear-gradient(to right, #2d6cdf var(--p,100%), rgba(255,255,255,.25) var(--p,100%)); }
+  #seek::-webkit-slider-thumb { -webkit-appearance:none; width:16px; height:16px; margin-top:-5px; border-radius:50%; background:#fff; }
+  #timeLabel { min-width:150px; text-align:right; font-variant-numeric:tabular-nums; font-size:14px; }
+  #btnRow { display:flex; align-items:center; gap:6px; margin-top:10px; flex-wrap:wrap; }
+  button { background:rgba(255,255,255,.1); color:var(--fg); border:1px solid rgba(255,255,255,.15);
+    border-radius:6px; padding:6px 11px; font-size:14px; cursor:pointer; font-family:inherit; }
+  button:hover { background:rgba(255,255,255,.2); }
+  #btnLive { border-color:var(--accent); }
+  #btnLive.on { background:var(--accent); color:#fff; }
+  #btnPlay { min-width:46px; }
+  .spacer { flex:1; }
+  #stats { font-size:12px; color:var(--dim); margin-right:8px; font-variant-numeric:tabular-nums; }
+  #vol { width:90px; }
+
+  #setup { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:#0b0b0d; z-index:10; }
+  #setup .card { background:var(--panel); border:1px solid #2a2a2e; border-radius:12px; padding:26px 28px; width:min(520px, 92vw); }
+  #setup h1 { font-size:20px; margin:0 0 4px; }
+  #setup p.sub { margin:0 0 18px; color:var(--dim); font-size:13px; }
+  #setup label { display:block; font-size:13px; color:var(--dim); margin:12px 0 4px; }
+  #setup select { width:100%; padding:7px 8px; background:#1c1c20; color:var(--fg); border:1px solid #333; border-radius:6px; font-size:14px; }
+  #setup .grid { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
+  #setup .est { margin-top:12px; font-size:12px; color:var(--dim); }
+  #setup .actions { margin-top:20px; display:flex; gap:10px; justify-content:flex-end; }
+  #btnStart { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; padding:8px 18px; }
+  #setupMsg { margin-top:12px; font-size:13px; color:#ffb4b4; white-space:pre-wrap; }
+  #help { font-size:12px; color:var(--dim); margin-top:16px; line-height:1.7; border-top:1px solid #2a2a2e; padding-top:12px; }
+  kbd { background:#2a2a2e; border-radius:3px; padding:0 5px; font-family:inherit; font-size:11px; }
+  #toast { position:absolute; top:16px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,.75);
+    padding:6px 14px; border-radius:6px; font-size:14px; opacity:0; transition:opacity .25s; pointer-events:none; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="live" autoplay playsinline></video>
+  <canvas id="replay"></canvas>
+  <div id="badge" class="live">● LIVE</div>
+  <div id="toast"></div>
+
+  <div id="controls">
+    <div id="seekRow">
+      <input id="seek" type="range" min="0" max="1" step="0.0001" value="1">
+      <div id="timeLabel">LIVE</div>
+    </div>
+    <div id="btnRow">
+      <button data-jump="-60" title="60秒戻る">« 60s</button>
+      <button data-jump="-10" title="10秒戻る (Shift+←)">« 10s</button>
+      <button data-jump="-5"  title="5秒戻る (←)">« 5s</button>
+      <button id="btnPlay" title="再生 / 一時停止 (Space)">❚❚</button>
+      <button data-jump="5"   title="5秒進む (→)">5s »</button>
+      <button data-jump="10"  title="10秒進む (Shift+→)">10s »</button>
+      <button id="btnLive" class="on" title="ライブに戻る (End)">● LIVE</button>
+      <div class="spacer"></div>
+      <span id="stats"></span>
+      <span title="音量 (↑↓)">🔊</span><input id="vol" type="range" min="0" max="1" step="0.01" value="1">
+      <button id="btnFs" title="全画面 (F)">⛶</button>
+      <button id="btnSettings" title="停止してデバイス設定に戻る">⚙</button>
+    </div>
+  </div>
+
+  <div id="setup">
+    <div class="card">
+      <h1>タイムシフト キャプチャビューア</h1>
+      <p class="sub">キャプチャボードの映像を表示しながら、直近の映像をメモリに保持して巻き戻せます。古い分は自動で破棄します。</p>
+      <label>映像デバイス</label>
+      <select id="selVideo"></select>
+      <label>音声デバイス</label>
+      <select id="selAudio"></select>
+      <div class="grid">
+        <div><label>解像度</label>
+          <select id="selRes">
+            <option value="1920x1080" selected>1920×1080</option>
+            <option value="1280x720">1280×720</option>
+            <option value="2560x1440">2560×1440</option>
+            <option value="3840x2160">3840×2160</option>
+          </select></div>
+        <div><label>フレームレート</label>
+          <select id="selFps"><option value="60" selected>60 fps</option><option value="30">30 fps</option></select></div>
+        <div><label>巻き戻し用の画質</label>
+          <select id="selBitrate">
+            <option value="4000000">低 (4 Mbps)</option>
+            <option value="8000000" selected>標準 (8 Mbps)</option>
+            <option value="14000000">高 (14 Mbps)</option>
+            <option value="24000000">最高 (24 Mbps)</option>
+          </select></div>
+        <div><label>巻き戻し可能な時間</label>
+          <select id="selBuffer">
+            <option value="5">5 分</option>
+            <option value="10" selected>10 分</option>
+            <option value="15">15 分</option>
+            <option value="20">20 分</option>
+          </select></div>
+      </div>
+      <div class="est" id="est"></div>
+      <div class="actions">
+        <button id="btnRefresh">デバイス再検出</button>
+        <button id="btnStart">開始</button>
+      </div>
+      <div id="setupMsg"></div>
+      <div id="help">
+        <kbd>Space</kbd> 再生/一時停止　<kbd>←</kbd><kbd>→</kbd> 5秒　<kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> 10秒
+        <kbd>J</kbd> 60秒戻る<br>
+        <kbd>,</kbd><kbd>.</kbd> コマ送り(一時停止中)　<kbd>End</kbd> ライブへ　<kbd>Home</kbd> 最古へ
+        <kbd>↑</kbd><kbd>↓</kbd> 音量　<kbd>M</kbd> ミュート　<kbd>F</kbd> 全画面
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ============================================================
+//  設定値
+// ============================================================
+const KEY_INTERVAL_US = 1_000_000;   // キーフレーム間隔（シーク応答性に効く）
+const LIVE_EDGE_US    = 250_000;     // ここまで追いついたらライブ表示に戻す
+const VIDEO_AHEAD_US  = 300_000;     // デコーダへ先読みする量
+const AUDIO_AHEAD_US  = 400_000;     // 音声をスケジュールしておく量
+
+// ============================================================
+//  DOM
+// ============================================================
+const $ = id => document.getElementById(id);
+const stage = $('stage'), liveEl = $('live'), canvas = $('replay'), ctx2d = canvas.getContext('2d');
+const badge = $('badge'), seek = $('seek'), timeLabel = $('timeLabel'), btnPlay = $('btnPlay'),
+      btnLive = $('btnLive'), statsEl = $('stats'), volEl = $('vol'), toastEl = $('toast');
+
+// ============================================================
+//  状態
+// ============================================================
+let stream = null, running = false, actx = null, gainNode = null;
+let bufferUs = 600e6, targetBitrate = 8e6, targetFps = 60;
+
+// 録画バッファ（リングバッファ相当。論理インデックス = base + 配列インデックス）
+let vChunks = [], vBase = 0, vBytes = 0;   // {ts, key, data, cfg}
+let aChunks = [], aBase = 0, aBytes = 0;   // {ts, n, ch, rate, data(Int16 planar)}
+let encoder = null, encCfg = null, encW = 0, encH = 0, currentDecCfg = null, lastKeyTs = -Infinity;
+let lastTrimTs = 0, droppedFrames = 0, codecLabel = '', fpsCounter = 0, fpsShown = 0, srcW = 0, srcH = 0;
+
+// 再生側
+const P = {
+  mode: 'live', playing: true, pos: 0, anchorPos: 0, anchorCtx: 0,
+  decoder: null, gen: 0, frames: [], feedIdx: 0, seekShowTs: 0,
+  audioIdx: 0, nextAudioTime: 0, sources: new Set(),
+};
+
+// ============================================================
+//  ユーティリティ
+// ============================================================
+function fmt(us, withTenth) {
+  const neg = us < 0; us = Math.abs(us);
+  const s = us / 1e6, m = Math.floor(s / 60), sec = s - m * 60;
+  const ss = withTenth ? sec.toFixed(1).padStart(4, '0') : String(Math.floor(sec)).padStart(2, '0');
+  return (neg ? '-' : '') + String(m).padStart(2, '0') + ':' + ss;
+}
+function lastIdxLE(arr, ts) {           // arr[i].ts <= ts となる最大の i（無ければ -1）
+  let lo = 0, hi = arr.length - 1, r = -1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (arr[m].ts <= ts) { r = m; lo = m + 1; } else hi = m - 1; }
+  return r;
+}
+function copyBytes(src) {
+  if (!src) return undefined;
+  if (src instanceof ArrayBuffer) return new Uint8Array(src.slice(0));
+  return new Uint8Array(src.buffer.slice(src.byteOffset, src.byteOffset + src.byteLength));
+}
+let toastTimer = 0;
+function toast(msg) {
+  toastEl.textContent = msg; toastEl.style.opacity = 1;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.style.opacity = 0, 1200);
+}
+const oldestTs = () => vChunks.length ? vChunks[0].ts : 0;
+const newestTs = () => vChunks.length ? vChunks[vChunks.length - 1].ts : 0;
+
+// 各トラックのタイムスタンプを performance.now() 基準の共通時計へ写す。
+// 到着遅延の最小値を追跡しつつゆっくり追従させるので、長時間でもズレが溜まらない。
+function makeClock() { return { offset: null }; }
+function mapTs(clock, ts) {
+  const o = performance.now() * 1000 - ts;
+  if (clock.offset === null || o < clock.offset) clock.offset = o;
+  else clock.offset += (o - clock.offset) * 0.002;
+  return ts + clock.offset;
+}
+
+// ============================================================
+//  デバイス選択画面
+// ============================================================
+async function listDevices() {
+  const msg = $('setupMsg'); msg.textContent = '';
+  try {
+    // ラベルを得るために一度だけ許可を取る
+    const tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: true }).catch(() =>
+      navigator.mediaDevices.getUserMedia({ video: true }));
+    tmp.getTracks().forEach(t => t.stop());
+  } catch (e) { msg.textContent = 'カメラ/マイクの許可が必要です: ' + e.message; }
+  const devs = await navigator.mediaDevices.enumerateDevices();
+  const sv = $('selVideo'), sa = $('selAudio');
+  const prevV = localStorage.getItem('tsv.video'), prevA = localStorage.getItem('tsv.audio');
+  sv.innerHTML = ''; sa.innerHTML = '<option value="">（音声なし）</option>';
+  const guess = /capture|cam link|elgato|avermedia|live gamer|hdmi|usb video|genki|magewell|i-o data|gv-/i;
+  for (const d of devs) {
+    const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label || d.kind;
+    if (d.kind === 'videoinput') sv.appendChild(o);
+    if (d.kind === 'audioinput') sa.appendChild(o);
+  }
+  const pick = (sel, prev) => {
+    const opts = [...sel.options];
+    const p = opts.find(o => o.value && o.value === prev) || opts.find(o => o.value && guess.test(o.textContent));
+    if (p) sel.value = p.value;
+  };
+  pick(sv, prevV); pick(sa, prevA);
+  if (!sv.options.length) msg.textContent = '映像デバイスが見つかりません。キャプチャボードの接続を確認してください。';
+}
+function updateEstimate() {
+  const br = +$('selBitrate').value, min = +$('selBuffer').value;
+  const mb = (br / 8 * min * 60 + 48000 * 2 * 2 * min * 60) / 1048576;
+  $('est').textContent = `推定メモリ使用量: 約 ${Math.round(mb)} MB（巻き戻し ${min} 分ぶん）`;
+}
+['selBitrate', 'selBuffer'].forEach(id => $(id).addEventListener('change', updateEstimate));
+$('btnRefresh').onclick = listDevices;
+$('btnStart').onclick = start;
+$('btnSettings').onclick = stopAll;
+
+// ============================================================
+//  開始 / 停止
+// ============================================================
+async function start() {
+  const msg = $('setupMsg'); msg.textContent = '';
+  const [w, h] = $('selRes').value.split('x').map(Number);
+  targetFps = +$('selFps').value; targetBitrate = +$('selBitrate').value;
+  bufferUs = +$('selBuffer').value * 60e6;
+  const vId = $('selVideo').value, aId = $('selAudio').value;
+  localStorage.setItem('tsv.video', vId); localStorage.setItem('tsv.audio', aId);
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { deviceId: vId ? { exact: vId } : undefined, width: { ideal: w }, height: { ideal: h }, frameRate: { ideal: targetFps } },
+      audio: aId ? { deviceId: { exact: aId }, echoCancellation: false, noiseSuppression: false,
+                     autoGainControl: false, channelCount: { ideal: 2 }, sampleRate: { ideal: 48000 } } : false,
+    });
+  } catch (e) { msg.textContent = 'デバイスを開けませんでした: ' + e.message + '\n他のソフト（OBS等）が使用中でないか確認してください。'; return; }
+
+  actx = new AudioContext({ latencyHint: 'interactive' });
+  gainNode = actx.createGain(); gainNode.connect(actx.destination);
+  await actx.resume();
+  setVolume(+(localStorage.getItem('tsv.vol') ?? 1));
+
+  vChunks = []; vBase = 0; vBytes = 0; aChunks = []; aBase = 0; aBytes = 0;
+  encW = encH = 0; currentDecCfg = null; lastKeyTs = -Infinity; droppedFrames = 0; lastTrimTs = 0;
+  running = true;
+
+  liveEl.srcObject = stream; liveEl.muted = false; liveEl.play().catch(() => {});
+  goLive();
+  $('setup').style.display = 'none';
+
+  const vt = stream.getVideoTracks()[0];
+  videoLoop(new MediaStreamTrackProcessor({ track: vt.clone() }).readable.getReader());
+  const at = stream.getAudioTracks()[0];
+  if (at) audioLoop(new MediaStreamTrackProcessor({ track: at.clone() }).readable.getReader());
+}
+
+function stopAll() {
+  running = false;
+  resetDecoder(); stopAudio();
+  if (encoder && encoder.state !== 'closed') encoder.close();
+  encoder = null;
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null; liveEl.srcObject = null;
+  if (actx) actx.close(); actx = null;
+  vChunks = []; aChunks = [];
+  $('setup').style.display = 'flex';
+  listDevices();
+}
+
+// ============================================================
+//  録画側：映像（WebCodecs でエンコードしてメモリに保持）
+// ============================================================
+async function configureEncoder(w, h) {
+  const codecs = ['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'vp09.00.41.08', 'vp8'];
+  for (const codec of codecs) {
+    for (const hw of ['prefer-hardware', 'no-preference']) {
+      const cfg = { codec, width: w, height: h, bitrate: targetBitrate, framerate: targetFps,
+                    latencyMode: 'realtime', hardwareAcceleration: hw };
+      if (codec.startsWith('avc1')) cfg.avc = { format: 'avc' };
+      try {
+        const s = await VideoEncoder.isConfigSupported(cfg);
+        if (!s.supported) continue;
+        if (!encoder || encoder.state === 'closed') {
+          encoder = new VideoEncoder({ output: onEncoded, error: e => { console.error('encoder', e); encW = encH = 0; } });
+        }
+        encoder.configure(cfg);
+        encCfg = cfg; encW = w; encH = h; lastKeyTs = -Infinity;
+        codecLabel = (codec.startsWith('avc1') ? 'H.264' : codec.startsWith('vp09') ? 'VP9' : 'VP8') +
+                     (hw === 'prefer-hardware' ? ' HW' : '');
+        return true;
+      } catch (e) { /* 次の候補へ */ }
+    }
+  }
+  toast('この環境で使えるエンコーダが見つかりません');
+  return false;
+}
+
+async function videoLoop(reader) {
+  const clock = makeClock();
+  let lastTs = -Infinity, fpsT0 = performance.now();
+  while (running) {
+    let r;
+    try { r = await reader.read(); } catch { break; }
+    if (r.done) break;
+    const frame = r.value;
+    fpsCounter++;
+    const now = performance.now();
+    if (now - fpsT0 >= 1000) { fpsShown = Math.round(fpsCounter * 1000 / (now - fpsT0)); fpsCounter = 0; fpsT0 = now; }
+    const w = frame.displayWidth, h = frame.displayHeight; srcW = w; srcH = h;
+    let ts = mapTs(clock, frame.timestamp);
+    if (ts <= lastTs) ts = lastTs + 1;   // 単調増加を保証
+    if (!running) { frame.close(); break; }
+    if (w !== encW || h !== encH) {      // 初回 or 入力解像度が変わった
+      frame.close();
+      await configureEncoder(w, h);
+      continue;
+    }
+    if (!encoder || encoder.state !== 'configured' || encoder.encodeQueueSize > 3) {
+      frame.close(); droppedFrames++; continue;
+    }
+    lastTs = ts;
+    const key = ts - lastKeyTs >= KEY_INTERVAL_US;
+    if (key) lastKeyTs = ts;
+    const f2 = new VideoFrame(frame, { timestamp: Math.round(ts) });
+    frame.close();
+    try { encoder.encode(f2, { keyFrame: key }); } catch (e) { console.error(e); }
+    f2.close();
+  }
+  try { reader.cancel(); } catch {}
+}
+
+function onEncoded(chunk, meta) {
+  if (meta && meta.decoderConfig) {
+    const d = meta.decoderConfig;
+    currentDecCfg = { codec: d.codec, codedWidth: d.codedWidth, codedHeight: d.codedHeight,
+                      description: copyBytes(d.description), colorSpace: d.colorSpace };
+  }
+  const isKey = chunk.type === 'key';
+  if (!vChunks.length && !isKey) return;           // 先頭は必ずキーフレーム
+  if (!currentDecCfg) return;
+  const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
+  vChunks.push({ ts: chunk.timestamp, key: isKey, data, cfg: isKey ? currentDecCfg : null });
+  vBytes += data.byteLength;
+  if (chunk.timestamp - lastTrimTs > 1e6) { lastTrimTs = chunk.timestamp; trim(); }
+}
+
+// 指定時間より古いデータを GOP 単位で破棄
+function trim() {
+  if (!vChunks.length) return;
+  const cutoff = newestTs() - bufferUs;
+  let cut = 0;
+  for (let i = 0; i < vChunks.length && vChunks[i].ts <= cutoff; i++) if (vChunks[i].key) cut = i;
+  if (cut > 0) {
+    for (let i = 0; i < cut; i++) vBytes -= vChunks[i].data.byteLength;
+    vChunks.splice(0, cut); vBase += cut;
+  }
+  const vOld = oldestTs();
+  let ac = 0;
+  while (ac < aChunks.length && aChunks[ac].ts + aChunks[ac].n / aChunks[ac].rate * 1e6 < vOld) {
+    aBytes -= aChunks[ac].data.byteLength; ac++;
+  }
+  if (ac) { aChunks.splice(0, ac); aBase += ac; }
+}
+
+// ============================================================
+//  録画側：音声（16bit PCM で保持）
+// ============================================================
+async function audioLoop(reader) {
+  const clock = makeClock();
+  while (running) {
+    let r;
+    try { r = await reader.read(); } catch { break; }
+    if (r.done) break;
+    const ad = r.value;
+    try {
+      const n = ad.numberOfFrames, ch = Math.min(ad.numberOfChannels, 2), rate = ad.sampleRate;
+      const ts = mapTs(clock, ad.timestamp);
+      const data = new Int16Array(n * ch), tmp = new Float32Array(n);
+      for (let c = 0; c < ch; c++) {
+        ad.copyTo(tmp, { planeIndex: c, format: 'f32-planar' });
+        const off = c * n;
+        for (let i = 0; i < n; i++) { const v = tmp[i]; data[off + i] = v >= 1 ? 32767 : v <= -1 ? -32768 : v * 32767; }
+      }
+      if (vChunks.length) { aChunks.push({ ts, n, ch, rate, data }); aBytes += data.byteLength; }
+    } finally { ad.close(); }
+  }
+  try { reader.cancel(); } catch {}
+}
+
+// ============================================================
+//  再生側
+// ============================================================
+function currentPos() {
+  if (P.mode === 'live') return newestTs();
+  if (!P.playing) return P.pos;
+  return P.anchorPos + (actx.currentTime - P.anchorCtx) * 1e6;
+}
+
+function resetDecoder() {
+  if (P.decoder && P.decoder.state !== 'closed') { try { P.decoder.close(); } catch {} }
+  P.decoder = null;
+  for (const f of P.frames) f.close();
+  P.frames = [];
+  P.gen++;
+}
+function newDecoder() {
+  resetDecoder();
+  const gen = P.gen;
+  P.decoder = new VideoDecoder({
+    output: f => {
+      if (gen !== P.gen || f.timestamp < P.seekShowTs) { f.close(); return; }  // シーク時の空回し分は捨てる
+      P.frames.push(f);
+      const pos = currentPos();
+      while (P.frames.length >= 2 && P.frames[1].timestamp <= pos) P.frames.shift().close();
+    },
+    error: e => {
+      if (gen !== P.gen) return;
+      console.warn('decoder', e);
+      setTimeout(() => { if (P.mode === 'replay') seekTo(currentPos(), P.playing); }, 50);
+    },
+  });
+}
+
+function stopAudio() {
+  for (const s of P.sources) { try { s.stop(); } catch {} }
+  P.sources.clear(); P.nextAudioTime = 0;
+}
+
+function goLive() {
+  resetDecoder(); stopAudio();
+  P.mode = 'live'; P.playing = true;
+  stage.classList.remove('replay');
+  liveEl.muted = false;
+  updateButtons();
+}
+
+function seekTo(target, play) {
+  if (!vChunks.length || !actx) return;
+  const oldest = oldestTs(), newest = newestTs();
+  target = Math.max(oldest, Math.min(target, newest));
+  if (play && target >= newest - LIVE_EDGE_US) { goLive(); return; }
+
+  stopAudio();
+  newDecoder();
+  let i = lastIdxLE(vChunks, target); if (i < 0) i = 0;
+  let k = i; while (k > 0 && !vChunks[k].key) k--;
+  P.seekShowTs = vChunks[i].ts;
+  P.decCfg = vChunks[k].cfg;
+  try { P.decoder.configure(P.decCfg); } catch (e) { console.error(e); return; }
+  P.feedIdx = vBase + k;
+
+  P.mode = 'replay'; P.playing = play; P.pos = target;
+  P.anchorPos = target; P.anchorCtx = actx.currentTime + 0.05;
+  P.audioIdx = aBase + Math.max(0, lastIdxLE(aChunks, target));
+  stage.classList.add('replay');
+  liveEl.muted = true;
+  updateButtons();
+}
+
+function pause() {
+  if (P.mode === 'live') { seekTo(newestTs(), false); return; }
+  P.pos = currentPos(); P.playing = false; stopAudio(); updateButtons();
+}
+function resume() {
+  if (P.mode === 'live') return;
+  if (P.pos >= newestTs() - LIVE_EDGE_US) { goLive(); return; }
+  P.anchorPos = P.pos; P.anchorCtx = actx.currentTime + 0.03;
+  P.audioIdx = aBase + Math.max(0, lastIdxLE(aChunks, P.pos)); P.nextAudioTime = 0;
+  P.playing = true; updateButtons();
+}
+function togglePlay() { (P.mode === 'live' || P.playing) ? pause() : resume(); }
+function jump(sec) {
+  if (!vChunks.length) return;
+  const wasLive = P.mode === 'live';
+  seekTo(currentPos() + sec * 1e6, wasLive ? true : P.playing);
+  toast((sec > 0 ? '+' : '') + sec + ' 秒');
+}
+function stepFrame(dir) {
+  if (!vChunks.length) return;
+  if (P.mode === 'live' || P.playing) pause();
+  const i = lastIdxLE(vChunks, P.pos);
+  const j = Math.max(0, Math.min(vChunks.length - 1, i + dir));
+  seekTo(vChunks[j].ts, false);
+}
+
+function feedVideo(pos) {
+  const d = P.decoder;
+  if (!d || d.state !== 'configured') return;
+  while (d.decodeQueueSize < 4 && P.frames.length < 8) {
+    const c = vChunks[P.feedIdx - vBase];
+    if (!c || c.ts > pos + VIDEO_AHEAD_US) break;
+    if (c.key && c.cfg !== P.decCfg) {   // 途中で入力解像度などが変わった場合は再設定
+      P.decCfg = c.cfg;
+      try { d.configure(c.cfg); } catch {}
+    }
+    try { d.decode(new EncodedVideoChunk({ type: c.key ? 'key' : 'delta', timestamp: c.ts, data: c.data })); }
+    catch (e) { console.warn(e); break; }
+    P.feedIdx++;
+  }
+}
+
+function scheduleAudio(pos) {
+  const now = actx.currentTime;
+  while (true) {
+    const c = aChunks[P.audioIdx - aBase];
+    if (!c || c.ts > pos + AUDIO_AHEAD_US) break;
+    P.audioIdx++;
+    const dur = c.n / c.rate;
+    let when = P.anchorCtx + (c.ts - P.anchorPos) / 1e6;
+    if (P.nextAudioTime && Math.abs(when - P.nextAudioTime) < 0.03) when = P.nextAudioTime; // 隙間・重なりを吸収
+    if (when + dur <= now) continue;
+    const buf = actx.createBuffer(c.ch, c.n, c.rate);
+    for (let ch = 0; ch < c.ch; ch++) {
+      const out = buf.getChannelData(ch), off = ch * c.n;
+      for (let i = 0; i < c.n; i++) out[i] = c.data[off + i] / 32768;
+    }
+    const src = actx.createBufferSource();
+    src.buffer = buf; src.connect(gainNode);
+    if (when < now) src.start(now, now - when); else src.start(when);
+    src.onended = () => P.sources.delete(src);
+    P.sources.add(src);
+    P.nextAudioTime = when + dur;
+  }
+}
+
+// ============================================================
+//  描画ループ
+// ============================================================
+function tick() {
+  requestAnimationFrame(tick);
+  if (!running) return;
+  if (P.mode === 'replay' && vChunks.length) {
+    let pos = currentPos();
+    // 再生位置が破棄済みの領域に入った場合は最古位置へ
+    if (P.feedIdx < vBase || pos < oldestTs()) { seekTo(oldestTs() + 300_000, P.playing); toast('バッファの最古位置です'); pos = currentPos(); }
+    if (P.audioIdx < aBase) P.audioIdx = aBase;
+    if (P.playing && pos >= newestTs() - LIVE_EDGE_US / 2) { goLive(); }
+    else {
+      feedVideo(pos);
+      let toDraw = null;
+      while (P.frames.length && P.frames[0].timestamp <= pos) { if (toDraw) toDraw.close(); toDraw = P.frames.shift(); }
+      if (toDraw) {
+        if (canvas.width !== toDraw.displayWidth || canvas.height !== toDraw.displayHeight) {
+          canvas.width = toDraw.displayWidth; canvas.height = toDraw.displayHeight;
+        }
+        ctx2d.drawImage(toDraw, 0, 0, canvas.width, canvas.height);
+        toDraw.close();
+      }
+      if (P.playing) scheduleAudio(pos);
+    }
+  }
+  updateTimeline();
+}
+
+// ============================================================
+//  UI
+// ============================================================
+let dragging = false, dragWasPlaying = true, lastDragSeek = 0;
+function sliderToTs(v) { return oldestTs() + (newestTs() - oldestTs()) * v; }
+function updateTimeline() {
+  const o = oldestTs(), n = newestTs(), span = Math.max(1, n - o);
+  const pos = currentPos();
+  if (!dragging) {
+    const v = P.mode === 'live' ? 1 : Math.max(0, Math.min(1, (pos - o) / span));
+    seek.value = v; seek.style.setProperty('--p', (v * 100) + '%');
+  }
+  const showPos = dragging ? sliderToTs(+seek.value) : pos;
+  timeLabel.textContent = P.mode === 'live' && !dragging
+    ? `LIVE  /  ${fmt(span)}`
+    : `${fmt(showPos - n, true)}  /  ${fmt(span)}`;
+}
+function updateButtons() {
+  btnPlay.textContent = (P.mode === 'live' || P.playing) ? '❚❚' : '▶';
+  btnLive.classList.toggle('on', P.mode === 'live');
+  badge.className = P.mode === 'live' ? 'live' : (P.playing ? 'replay' : 'paused');
+  badge.textContent = P.mode === 'live' ? '● LIVE' : (P.playing ? '◀◀ 巻き戻し再生中' : '❚❚ 一時停止');
+}
+setInterval(() => {
+  if (!running) return;
+  const mb = (vBytes + aBytes) / 1048576;
+  statsEl.textContent = `${srcW}×${srcH} ${fpsShown}fps · ${codecLabel} · ${Math.round(mb)}MB` +
+    (droppedFrames ? ` · ドロップ ${droppedFrames}` : '');
+}, 500);
+
+seek.addEventListener('input', () => {
+  if (!vChunks.length) return;
+  if (!dragging) { dragging = true; dragWasPlaying = P.mode === 'live' || P.playing; }
+  seek.style.setProperty('--p', (seek.value * 100) + '%');
+  const now = performance.now();
+  if (now - lastDragSeek > 120) { lastDragSeek = now; seekTo(sliderToTs(+seek.value), false); }
+});
+seek.addEventListener('change', () => {
+  dragging = false;
+  if (!vChunks.length) return;
+  seekTo(sliderToTs(+seek.value), dragWasPlaying);
+});
+document.querySelectorAll('[data-jump]').forEach(b => b.onclick = () => jump(+b.dataset.jump));
+btnPlay.onclick = togglePlay;
+btnLive.onclick = goLive;
+$('btnFs').onclick = toggleFs;
+function toggleFs() { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(); }
+
+function setVolume(v) {
+  v = Math.max(0, Math.min(1, v));
+  volEl.value = v; liveEl.volume = v; if (gainNode) gainNode.gain.value = v;
+  localStorage.setItem('tsv.vol', v);
+}
+volEl.oninput = () => setVolume(+volEl.value);
+let preMute = 1;
+
+document.addEventListener('keydown', e => {
+  if (!running || e.target.tagName === 'SELECT') return;
+  const k = e.key;
+  if (k === ' ' || k === 'k' || k === 'K') { e.preventDefault(); togglePlay(); }
+  else if (k === 'ArrowLeft')  { e.preventDefault(); jump(e.shiftKey ? -10 : -5); }
+  else if (k === 'ArrowRight') { e.preventDefault(); jump(e.shiftKey ? 10 : 5); }
+  else if (k === 'j' || k === 'J') jump(-60);
+  else if (k === ',') stepFrame(-1);
+  else if (k === '.') stepFrame(1);
+  else if (k === 'End') goLive();
+  else if (k === 'Home') seekTo(oldestTs(), P.mode === 'live' ? true : P.playing);
+  else if (k === 'ArrowUp')   { e.preventDefault(); setVolume(+volEl.value + 0.05); toast('音量 ' + Math.round(volEl.value * 100)); }
+  else if (k === 'ArrowDown') { e.preventDefault(); setVolume(+volEl.value - 0.05); toast('音量 ' + Math.round(volEl.value * 100)); }
+  else if (k === 'm' || k === 'M') { if (+volEl.value > 0) { preMute = +volEl.value; setVolume(0); toast('ミュート'); } else { setVolume(preMute); toast('ミュート解除'); } }
+  else if (k === 'f' || k === 'F') toggleFs();
+});
+canvas.addEventListener('dblclick', toggleFs);
+liveEl.addEventListener('dblclick', toggleFs);
+
+// マウスが止まったらコントロールを隠す
+let idleTimer = 0;
+function wake() { stage.classList.remove('idle'); clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => { if (running && !dragging) stage.classList.add('idle'); }, 2500); }
+document.addEventListener('mousemove', wake); document.addEventListener('keydown', wake);
+
+// ============================================================
+//  起動
+// ============================================================
+(function init() {
+  updateEstimate();
+  if (!('MediaStreamTrackProcessor' in window) || !('VideoEncoder' in window) || !('VideoDecoder' in window)) {
+    $('setupMsg').textContent = 'このブラウザには必要な機能がありません。Google Chrome か Microsoft Edge で開いてください。';
+    $('btnStart').disabled = true;
+    return;
+  }
+  listDevices();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
