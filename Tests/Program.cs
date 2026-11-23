@@ -24,6 +24,15 @@ namespace PuyoTests
             // 開発用: --make-templates <samples> <出力.cs> / --recog <画像...>
             if (args.Length >= 3 && args[0] == "--make-templates") { RecogTool.MakeTemplates(args[1], args[2]); return 0; }
             if (args.Length >= 2 && args[0] == "--recog") { foreach (var p in args.Skip(1)) RecogTool.Dump(p); return 0; }
+            if (args.Length >= 2 && args[0] == "--ocr")     // 名前欄の文字認識だけ
+            {
+                foreach (var p in args.Skip(1))
+                {
+                    var f = FrameImage.Load(p);
+                    Console.WriteLine($"{System.IO.Path.GetFileName(p)}: 1P=[{NameOcr.ReadName(f, 0).Result}] 2P=[{NameOcr.ReadName(f, 1).Result}]");
+                }
+                return 0;
+            }
             if (args.Length >= 6 && args[0] == "--px")   // --px 画像 x1 y1 x2 y2 : 範囲の画素の HSV の分布
             {
                 var f = FrameImage.Load(args[1]);
@@ -288,6 +297,13 @@ namespace PuyoTests
                     // 「1」と「I」は区別しきれないので COMI も可
                     Check(a == "shiokara" && (b == "COM1" || b == "COMI"), $"{n} 名前 shiokara / COM1", $"{a} / {b}");
                 }
+            }
+            if (NameOcr.Available)
+            {
+                // ひらがな・漢字の名前（名前欄に書き込んだ合成画像）
+                var jp = F("synthetic_names_jp.png");
+                string a = NameOcr.ReadName(jp, 0).Result, b = NameOcr.ReadName(jp, 1).Result;
+                Check(a == "しおから" && b == "塩辛太郎", "日本語の名前 しおから / 塩辛太郎", $"{a} / {b}");
             }
             else Console.WriteLine("  （文字認識が使えないため名前のテストは省略）");
             // 実際の解析用の映像（ffmpeg が切り出した 1520×880）

@@ -53,6 +53,8 @@ namespace TimeshiftViewer.Puyo
             catch { return null; }
         }
 
+        static bool IsKatakana(char c) => c >= 'ァ' && c <= 'ヺ';
+
         static string Clean(string s)
         {
             if (string.IsNullOrWhiteSpace(s)) return null;
@@ -73,7 +75,11 @@ namespace TimeshiftViewer.Puyo
                 }
                 s = sb.ToString();
             }
-            return s;
+            // カタカナに続く「-」は長音「ー」
+            var chars = s.ToCharArray();
+            for (int i = 1; i < chars.Length; i++)
+                if ((chars[i] == '-' || chars[i] == '－' || chars[i] == '一') && IsKatakana(chars[i - 1])) chars[i] = 'ー';
+            return new string(chars);
         }
 
         // 文字は白（彩度が低く明るい）、背景は青や赤のバー。文字を黒・それ以外を白にして 3 倍に拡大する
@@ -99,6 +105,7 @@ namespace TimeshiftViewer.Puyo
             float vmax = vs[(int)(vs.Count * 0.95)];
             float th = Math.Max(0.4f, vmax * 0.78f);
 
+            // 2値にして拡大する（濃淡を残す・滑らかに拡大する方法も試したが、濁点が消えるなど悪化した）
             int W = w * scale + 40, H = h * scale + 40;     // 余白をつける
             var buf = new byte[W * H * 4];
             for (int i = 0; i < buf.Length; i++) buf[i] = 255;
