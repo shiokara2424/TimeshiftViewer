@@ -60,7 +60,7 @@ TimeshiftViewer.exe (C#, .NET Framework 4.8, WinForms)
 - **名前付きパイプへの ffmpeg 出力は `-y` が要る**（既存ファイル扱いで "File exists" で終了する）。
 - **mpv のシークは seekable-ranges の終端（キーフレーム単位）を超えてはいけない**。lua の `cache_range()` の第3値でクランプする。
 - ライブ時は遅れ > 1.2s で speed 1.08、< 0.45s で 1.0 に戻す。連打は直前のシーク先 `pending` から積み上げる。
-- **ペン（lua）**: 線は映像基準の 0〜1 座標。描画は「行って戻る」面積ゼロの ASS 図形の縁取り（\bord）。`click` は complex バインドで down/up を受ける。ペンのボタンは操作パネルの左端、パレットはその真上（盤面に重ならない）。6色。
+- **ペン（lua）**: 線は映像基準の 0〜1 座標。描画は「行って戻る」面積ゼロの ASS 図形の縁取り（\bord）。`click` は complex バインドで down/up を受ける。パレットは画面中央（2つの盤面の間、NEXT 欄の下・勝利数/セット数の上）に2段。位置は映像の 1920×1080 基準。6色。
 - **mpv の `window-dragging` が有効だと左ドラッグの途中で up が飛ぶ** → `window-dragging=no`。
 - mpv の標準キー割り当ては `input-builtin-bindings=no` で無効化（`CLOSE_WIN quit` を忘れない）。
 - --wid で埋め込んだ mpv の上に WinForms のコントロールを重ねても、正しく前面に描かれる（d3d11 でも可）。

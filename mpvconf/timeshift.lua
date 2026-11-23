@@ -233,7 +233,8 @@ local function layout()
   L.bar_x1, L.bar_x2, L.bar_y = 30, w - 230, h - 88
   -- ボタン行
   local defs = {
-    { label = '« 10s', w = 84, act = function() ts_seek(-10) end },
+    { label = 'pen',   w = 64, act = function() pen_set(not pen.on) end },
+    { label = '« 10s', w = 84, act = function() ts_seek(-10) end, gap = 28 },
     { label = '« 5s',  w = 76, act = function() ts_seek(-5) end },
     { label = 'play',  w = 64, act = toggle_pause },
     { label = '5s »',  w = 76, act = function() ts_seek(5) end },
@@ -251,31 +252,41 @@ local function layout()
     d.x1, d.y1, d.x2, d.y2 = x, y1, x + d.w, y1 + bh
     x = d.x2
   end
-  -- ペンのボタンは左端（パレットをその真上に出す。盤面に重ならない位置）
-  local penb = { label = 'pen', w = 64, act = function() pen_set(not pen.on) end }
-  penb.x1, penb.y1, penb.x2, penb.y2 = 30, y1, 30 + penb.w, y1 + bh
-  table.insert(defs, 1, penb)
   L.buttons = defs
 
-  -- ペンのパレット（ペンモード中だけ。ペンのボタンの真上に縦に並べる）
+  -- ペンのパレット（ペンモード中だけ）
+  -- 画面中央、2つの盤面の間で NEXT 欄より下・勝利数／セット数より上の空いている所に2段で置く。
+  -- 位置は映像の 1920×1080 基準（黒帯やウィンドウの大きさが変わってもずれない）
   if pen.on then
+    local vx1, vy1, vx2, vy2 = video_rect()
+    if not vx1 then vx1, vy1, vx2, vy2 = 0, 0, w, h end
+    local k = (vy2 - vy1) / 1080
+    local function VX(x) return vx1 + x * (vx2 - vx1) / 1920 end
+    local function VY(y) return vy1 + y * (vy2 - vy1) / 1080 end
     local items = {}
-    for i = 1, #PEN_COLORS do items[#items + 1] = { kind = 'color', n = i, act = function() pen.color = i end } end
-    items[#items + 1] = { kind = 'undo',  label = '戻す',   act = function() mp.commandv('script-message', 'ts-pen-undo') end, gap = 18 }
-    items[#items + 1] = { kind = 'clear', label = '全消し', act = function() pen_clear(false) end }
-    items[#items + 1] = { kind = 'close', label = '終了',   act = function() pen_set(false) end, gap = 18 }
-    local pw, ph, pg = 76, 46, 8
-    local tot = 0
-    for i, it in ipairs(items) do tot = tot + ph + (i > 1 and (it.gap or pg) or 0) end
-    local px = math.max(8, penb.x1 + math.floor((penb.w - pw) / 2))
-    local py = math.max(40, L.panel_y - 14 - tot)   -- 操作パネル（シークバー）のすぐ上から上へ積む
-    for i, it in ipairs(items) do
-      if i > 1 then py = py + (it.gap or pg) end
-      it.x1, it.y1, it.x2, it.y2 = px, py, px + pw, py + ph
-      py = it.y2
+    local cw, ch, g = math.floor(56 * k), math.floor(44 * k), math.floor(8 * k)
+    local rowW = #PEN_COLORS * cw + (#PEN_COLORS - 1) * g
+    local x0 = math.floor(VX(960) - rowW / 2)
+    local y0 = math.floor(VY(640) - ch - g / 2)          -- 上の段（色）。中心 y≈640（NEXT 欄の下端 ≈430、セット数のタブ ≈928）
+    for i = 1, #PEN_COLORS do
+      local x = x0 + (i - 1) * (cw + g)
+      items[#items + 1] = { kind = 'color', n = i, act = function() pen.color = i end, x1 = x, y1 = y0, x2 = x + cw, y2 = y0 + ch }
+    end
+    local bw = math.floor((rowW - 2 * g) / 3)
+    local y1b = y0 + ch + g
+    local defs2 = {
+      { kind = 'undo',  label = '戻す',   act = function() mp.commandv('script-message', 'ts-pen-undo') end },
+      { kind = 'clear', label = '全消し', act = function() pen_clear(false) end },
+      { kind = 'close', label = '終了',   act = function() pen_set(false) end },
+    }
+    for i, it in ipairs(defs2) do
+      local x = x0 + (i - 1) * (bw + g)
+      it.x1, it.y1, it.x2, it.y2 = x, y1b, x + bw, y1b + ch
+      items[#items + 1] = it
     end
     L.palette = items
-    L.palette_box = { px - 8, items[1].y1 - 8, px + pw + 8, items[#items].y2 + 8 }
+    L.palette_box = { x0 - g, y0 - g, x0 + rowW + g, y1b + ch + g }
+    L.palette_k = k
   end
   return L
 end
@@ -470,8 +481,10 @@ local function draw()
 
   draw_strokes(ev)
 
-  -- ペンのパレット（右端）
+  -- ペンのパレット（画面中央）
   if pen.on and L.palette then
+    local pk = L.palette_k or 1
+    local bd, ins = math.max(2, math.floor(4 * pk)), math.max(3, math.floor(6 * pk))
     local m = mp.get_property_native('mouse-pos')
     local hov = m and hit_palette(L, m.x, m.y)
     local b = L.palette_box
@@ -480,16 +493,16 @@ local function draw()
       local hot = (hov == it)
       if it.kind == 'color' then
         local sel = (pen.color == it.n)
-        if sel then ev[#ev + 1] = rect(it.x1 - 4, it.y1 - 4, it.x2 + 4, it.y2 + 4, 'FFFFFF', '00') end
+        if sel then ev[#ev + 1] = rect(it.x1 - bd, it.y1 - bd, it.x2 + bd, it.y2 + bd, 'FFFFFF', '00') end
         ev[#ev + 1] = rect(it.x1, it.y1, it.x2, it.y2, hot and '505050' or '202020', '00')
-        ev[#ev + 1] = rect(it.x1 + 6, it.y1 + 6, it.x2 - 6, it.y2 - 6, PEN_COLORS[it.n].c, '00')
+        ev[#ev + 1] = rect(it.x1 + ins, it.y1 + ins, it.x2 - ins, it.y2 - ins, PEN_COLORS[it.n].c, '00')
       else
         local fill = hot and (it.kind == 'close' and '3A3ADD' or '606060') or '303030'
         ev[#ev + 1] = rect(it.x1, it.y1, it.x2, it.y2, fill, '10')
-        ev[#ev + 1] = text_at((it.x1 + it.x2) / 2, (it.y1 + it.y2) / 2, 5, 22, 'FFFFFF', it.label)
+        ev[#ev + 1] = text_at((it.x1 + it.x2) / 2, (it.y1 + it.y2) / 2, 5, math.floor(22 * pk), 'FFFFFF', it.label)
       end
     end
-    ev[#ev + 1] = text_at((b[1] + b[3]) / 2, b[2] - 8, 2, 20, 'FFFFFF', '✎ ペン')
+    ev[#ev + 1] = text_at((b[1] + b[3]) / 2, b[2] - math.floor(6 * pk), 2, math.floor(20 * pk), 'FFFFFF', '✎ ペン')
   end
 
   if not pos or not e then
