@@ -30,7 +30,7 @@ namespace TimeshiftViewer
         {
             player = p;
             analyze = analyzeMatches;
-            player.LoadRequested += side => _ = LoadSimFromScreen(side);
+            player.LoadRequested += () => _ = LoadSimFromScreen();
             analyzer.NameReader = (f, side) => NameOcr.ReadName(f, side).Result;
         }
 
@@ -176,7 +176,8 @@ namespace TimeshiftViewer
         }
 
         // ---------------- シミュレーターへの読み込み ----------------
-        public async Task LoadSimFromScreen(int side)
+        /// <summary>今の画面から 1P・2P 両方の盤面と、その試合のツモ・各側の手数を読み込む</summary>
+        public async Task LoadSimFromScreen()
         {
             if (ipc == null) return;
             var sim = player.Sim;
@@ -188,30 +189,37 @@ namespace TimeshiftViewer
                 await ipc.Command("screenshot-to-file", path, "video");
                 FrameImage f = await Task.Run(() => File.Exists(path) ? FrameImage.Load(path) : null);
                 if (f == null) return;
-                var field = Recognizer.ReadField(f, side);
-                var (n1, n2) = Recognizer.ReadNext(f, side);
 
                 MatchInfo m;
                 lock (analyzer) m = analyzer.Matches.LastOrDefault(x => x.Start <= t + 0.2 && (x.End < 0 || x.End >= t - 0.2));
-                TsumoSource src = m?.Tsumo;
-                int idx = 0;
-                string label;
-                if (m != null && src != null)
+                // 試合が分からない（ツモ未検知）ときは全パターンから仮に選ぶ
+                TsumoSource src = m?.Tsumo ?? TsumoSource.FromKnown(4, null);
+
+                var fields = new Field[2];
+                var idx = new int[2];
+                var labels = new string[2];
+                for (int side = 0; side < 2; side++)
                 {
-                    lock (analyzer) idx = m.HandIndexAt(side, t);
-                    idx = AlignWithNext(src, idx, n1, n2, m.Swapped);
-                    label = $"第{m.Id}戦 {(side == 0 ? "1P" : "2P")} {idx + 1}手目（画面から）";
-                }
-                else
-                {
-                    // 試合が分からない: ツモは全パターンから仮に選ぶ
-                    src = TsumoSource.FromKnown(4, null);
-                    label = $"{(side == 0 ? "1P" : "2P")} 画面から（試合を検知できていません）";
+                    fields[side] = Recognizer.ReadField(f, side);
+                    var (n1, n2) = Recognizer.ReadNext(f, side);
+                    string name = side == 0 ? "1P" : "2P";
+                    if (m != null && m.Tsumo != null)
+                    {
+                        lock (analyzer) idx[side] = m.HandIndexAt(side, t);
+                        idx[side] = AlignWithNext(src, idx[side], n1, n2, m.Swapped);
+                        string who = m.Names[side] != null ? $"{m.Names[side]}（{name}）" : name;
+                        labels[side] = $"第{m.Id}戦 {who} {idx[side] + 1}手目（画面から）";
+                    }
+                    else
+                    {
+                        idx[side] = 0;
+                        labels[side] = $"{name} 画面から（試合を検知できていません）";
+                    }
                 }
                 player.BeginInvoke((Action)(() =>
                 {
                     sim.SetTsumo(src);
-                    sim.LoadPosition(field, idx, label);
+                    for (int side = 0; side < 2; side++) sim.LoadPosition(side, fields[side], idx[side], labels[side]);
                 }));
             }
             catch (Exception ex)

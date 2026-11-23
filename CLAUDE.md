@@ -31,7 +31,7 @@ TimeshiftViewer.exe (C#, .NET Framework 4.8, WinForms)
 | `mpvconf/*` | exe に埋め込み、起動時に `mpv-config/` へ書き出す |
 | `Puyo/Tsumo.cs` | ぷよぷよeスポーツ（対戦）のツモ生成とシード値の識別（仕様: ユーザー提供の puyo_tsumo_spec.md）。絞り込めなければ候補から一様に無作為に選ぶ（リザーバサンプリング） |
 | `Puyo/Field.cs` `SimState.cs` | 盤面・連鎖・通ルールの得点、局面ツリー（Undo/Redo/分岐） |
-| `Puyo/SimPanel.cs` `SimForm.cs` `PuyoViews.cs` `TsumoDialog.cs` | シミュレーター画面（SimPanel は埋め込み用の部品、SimForm は単独ウィンドウ） |
+| `Puyo/SimPanel.cs` `SimForm.cs` `PuyoViews.cs` `TsumoDialog.cs` | シミュレーター画面（SimPanel は埋め込み用の部品、SimForm は単独ウィンドウ）。1P・2P の2面を持ち（SimState を2つ）、ツモは共通・手数は別。操作対象は既定 1P、Tab で切替。プレーヤーではウィンドウ全体（下の操作パネル以外）に重ね、開くと一時停止・閉じると元の状態に戻す |
 | `Puyo/Recognizer.cs` | 画像認識。座標は 1920×1080 基準で固定（`PuyoLayout`）。ぷよの色は画素ごとの HSV 多数決、数字は TW×TH の形の見本と比較 |
 | `Puyo/DigitTemplates*.cs` | 数字の見本（`Tests --make-templates samples Puyo/DigitTemplates.Data.cs` で samples/ のスコア欄から生成） |
 | `Puyo/NameOcr.cs` | プレイヤー名（Windows.Media.Ocr。Microsoft.Windows.SDK.Contracts を参照。en-US の認識エンジンがないと「1」と「I」を取り違える） |

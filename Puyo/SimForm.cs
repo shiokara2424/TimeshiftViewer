@@ -35,9 +35,18 @@ namespace TimeshiftViewer.Puyo
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
             Controls.Add(Panel);
             ClientSize = Panel.Size;
+            Shown += (s, e) => Panel.FocusBoard();
             MinimumSize = new Size(900, 600);
         }
 
         public void SetTsumo(TsumoSource src) => Panel.SetTsumo(src);
+
+        // フォーカスがシミュレーターの外（ウィンドウ自体）にあるときのキーも渡す
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            // ウィンドウ自体に来たキー（フォーカスが外にある・ウィンドウ宛てに送られた）
+            if ((!Panel.ContainsFocus || msg.HWnd == Handle) && Panel.HandleKey(keyData)) return true;
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
     }
 }

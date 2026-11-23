@@ -15,14 +15,12 @@ namespace TimeshiftViewer
     {
         public readonly Panel VideoHost;
         SimPanel sim;
-        bool simRight = true;
         MpvIpc ipc;
         bool fullscreen;
         FormWindowState prevState = FormWindowState.Maximized;
         public bool AllowClose;
         public event Action<string, string[]> PlayerMessage;   // UI スレッドで呼ぶ
-        public event Action<int> LoadRequested;                // 画面の盤面をシミュレーターに読み込む（0=1P 1=2P）
-        int loadSide;
+        public event Action LoadRequested;                     // 画面の盤面（1P・2P 両方）をシミュレーターに読み込む
         bool simShown;
 
         const int BottomReserve = 130;    // mpv の操作パネル（timeshift.lua の PANEL_H）を隠さない
@@ -106,8 +104,11 @@ namespace TimeshiftViewer
         }
 
         // ---------------- シミュレーター ----------------
+        static void Dbg(string s) { if (Environment.GetEnvironmentVariable("TSV_DEBUG") != null) try { System.IO.File.AppendAllText(System.IO.Path.Combine(Paths.Base, "debug-layout.txt"), s + Environment.NewLine); } catch { } }
+
         public void ToggleSim()
         {
+            Dbg($"ToggleSim visible={sim?.Visible}");
             if (sim != null && sim.Visible) HideSim();
             else ShowSim();
         }
@@ -117,15 +118,8 @@ namespace TimeshiftViewer
             if (sim == null)
             {
                 sim = new SimPanel();
-                sim.AddToolButton("画面から読み込む", (s, e) => LoadRequested?.Invoke(loadSide));
-                Button sideBtn = null;
-                sideBtn = sim.AddToolButton("読む盤面: 1P", (s, e) =>
-                {
-                    loadSide = 1 - loadSide;
-                    sideBtn.Text = "読む盤面: " + (loadSide == 0 ? "1P" : "2P");
-                    LoadRequested?.Invoke(loadSide);
-                });
-                sim.AddToolButton("左右を入れ替え", (s, e) => { simRight = !simRight; LayoutSim(); });
+                sim.TsumoKey = false;     // T はシミュレーターを閉じるキー
+                sim.AddToolButton("画面から読み込む", (s, e) => LoadRequested?.Invoke());
                 sim.AddToolButton("閉じる（T）", (s, e) => HideSim());
                 Controls.Add(sim);
                 // DPI の自動スケーリングでサイズが変わったら置き直す
@@ -137,11 +131,25 @@ namespace TimeshiftViewer
             sim.BringToFront();
             LayoutSim();
             BeginInvoke((Action)LayoutSim);
-            // 開いたときに今の画面の盤面を読み込む
-            if (wasHidden) LoadRequested?.Invoke(loadSide);
-            sim.Focus();
-            sim.SelectNextControl(sim, true, true, true, true);
+            // 開いたら再生を止め（開く前の状態を覚えておく）、止めた画面の盤面を読み込む
+            if (wasHidden) _ = PauseAndLoad();
+            sim.FocusBoard();
             return sim;
+        }
+
+        bool? pausedBeforeSim;     // シミュレーターを開く前に一時停止していたか（null = 不明・未取得）
+
+        async System.Threading.Tasks.Task PauseAndLoad()
+        {
+            if (ipc != null)
+            {
+                var p = await ipc.Command("get_property", "pause");
+                pausedBeforeSim = p is bool b ? b : (bool?)null;
+                if (Environment.GetEnvironmentVariable("TSV_DEBUG") != null)
+                    System.IO.File.AppendAllText(System.IO.Path.Combine(Paths.Base, "debug-layout.txt"), $"PauseAndLoad pause={p} ({p?.GetType().Name}) before={pausedBeforeSim}\n");
+                if (pausedBeforeSim == false) await ipc.Command("set_property", "pause", true);
+            }
+            LoadRequested?.Invoke();
         }
 
         void HideSim()
@@ -150,6 +158,9 @@ namespace TimeshiftViewer
             simShown = false;
             sim.Visible = false;
             VideoHost.Focus();
+            // 開く前の状態に戻す（再生していたなら再生、一時停止していたなら一時停止）
+            if (ipc != null && pausedBeforeSim.HasValue) ipc.Send("set_property", "pause", pausedBeforeSim.Value);
+            pausedBeforeSim = null;
         }
 
         bool laying;
@@ -162,8 +173,8 @@ namespace TimeshiftViewer
                 var cs = ClientSize;
                 float k = DeviceDpi / 96f;
                 int h = Math.Max(300, cs.Height - (int)(BottomReserve * k));
-                int w = Math.Min(cs.Width, Math.Max(cs.Width / 2, (int)(900 * k)));
-                var want = new Rectangle(simRight ? cs.Width - w : 0, 0, w, h);
+                // ウィンドウ全体に広げる（下のシークバー・操作パネルは見えるように残す）
+                var want = new Rectangle(0, 0, cs.Width, h);
                 if (sim.Bounds != want) sim.Bounds = want;
                 if (Environment.GetEnvironmentVariable("TSV_DEBUG") != null)
                     System.IO.File.AppendAllText(System.IO.Path.Combine(Paths.Base, "debug-layout.txt"),
@@ -210,9 +221,12 @@ namespace TimeshiftViewer
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            // シミュレーターにフォーカスがあるときはシミュレーターの操作（T は閉じる）
             if (sim != null && sim.Visible && sim.ContainsFocus)
             {
                 if (keyData == Keys.T) { HideSim(); return true; }
+                // ウィンドウ宛てに届いたキーは子の ProcessCmdKey を通らないので、ここで渡す
+                if (msg.HWnd == Handle && sim.HandleKey(keyData)) return true;
                 return base.ProcessCmdKey(ref msg, keyData);
             }
             if (ipc != null)
