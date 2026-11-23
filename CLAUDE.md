@@ -64,6 +64,7 @@ TimeshiftViewer.exe (C#, .NET Framework 4.8, WinForms)
 - **mpv の `window-dragging` が有効だと左ドラッグの途中で up が飛ぶ** → `window-dragging=no`。
 - mpv の標準キー割り当ては `input-builtin-bindings=no` で無効化（`CLOSE_WIN quit` を忘れない）。
 - --wid で埋め込んだ mpv の上に WinForms のコントロールを重ねても、正しく前面に描かれる（d3d11 でも可）。
+- **Windows で --wid 埋め込みの mpv はマウスを受け取らない**（カーソルの下はアプリ側のパネル。mouse-pos が 0,0 / hover=false のまま）。PlayerForm の VideoHost でマウスの移動・ボタン・ホイールを受け、IPC の `mouse x y` / `keydown`・`keyup MBTN_*` / `keypress WHEEL_*` で送る。ダブルクリックは mpv が押す間隔から判定する。カーソルの自動非表示も PlayerForm 側で行う。
 - WinForms の UserControl はウィンドウに追加した時点でハンドルが作られるので、「表示済みか」は自前のフラグで管理する。
 - 解析の時刻: 解析用画像の到着時刻を、定期取得した demuxer-cache-time に換算する。対応が取れる前の数秒は最初の画像からの経過時間で代用。
 - 認識: 3列目12段目の × 印は赤ぷよと紛らわしい（埋まり具合 55% 未満は空）。ゴーの瞬間は画面が少し暗く、★の金色は彩度・明るさを緩めて判定。セット数の文字は細く圧縮で途切れるので、数字範囲の暗い画素をまとめて1つの形として比べる。勝利数・セット数は同じ読みが3枚続いたものだけ使う。

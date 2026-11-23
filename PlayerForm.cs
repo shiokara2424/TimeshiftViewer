@@ -40,9 +40,72 @@ namespace TimeshiftViewer
 
             VideoHost = new Panel { Dock = DockStyle.Fill, BackColor = Color.Black };
             Controls.Add(VideoHost);
-            // 映像の上でクリックしたら mpv にキー入力を戻す（シミュレーターからフォーカスを外す）
-            VideoHost.MouseDown += (s, e) => VideoHost.Focus();
+
+            // --wid で埋め込んだ mpv はマウスを受け取らない（マウスはこのパネルに来る）ので、IPC で mpv に送る。
+            // 座標はパネルの座標 = mpv の OSD の座標
+            VideoHost.MouseMove += (s, e) =>
+            {
+                if (e.Location == lastMouse) return;
+                lastMouse = e.Location;
+                ShowCursor();
+                ipc?.Send("mouse", e.X, e.Y);
+            };
+            VideoHost.MouseLeave += (s, e) => ShowCursor();
+            // 映像の上でしばらくマウスを動かさなければカーソルを隠す（配信に映らないように。mpv の cursor-autohide の代わり）
+            cursorTimer.Tick += (s, e) =>
+            {
+                cursorTimer.Stop();
+                if (!cursorHidden && VideoHost.ClientRectangle.Contains(VideoHost.PointToClient(Cursor.Position)) && ContainsFocus)
+                {
+                    Cursor.Hide(); cursorHidden = true;
+                }
+            };
+            VideoHost.MouseDown += (s, e) =>
+            {
+                // 映像をクリックしたらキー入力をプレーヤー側に戻す（シミュレーターからフォーカスを外す）
+                ActiveControl = null;
+                Focus();
+                string b = MouseName(e.Button);
+                if (ipc == null || b == null) return;
+                ipc.Send("mouse", e.X, e.Y);
+                ipc.Send("keydown", b);       // ダブルクリック（MBTN_LEFT_DBL）は mpv が押す間隔から判定する
+            };
+            VideoHost.MouseUp += (s, e) =>
+            {
+                string b = MouseName(e.Button);
+                if (ipc == null || b == null) return;
+                ipc.Send("mouse", e.X, e.Y);
+                ipc.Send("keyup", b);
+            };
+            VideoHost.MouseWheel += (s, e) =>
+            {
+                if (ipc == null) return;
+                int n = Math.Max(1, Math.Abs(e.Delta) / 120);
+                for (int i = 0; i < n; i++) ipc.Send("keypress", e.Delta > 0 ? "WHEEL_UP" : "WHEEL_DOWN");
+            };
+            // ホイールはフォーカスのあるコントロールに届くので、映像の上にマウスが来たらフォーカスを取る（シミュレーター操作中は除く）
+            VideoHost.MouseEnter += (s, e) => { if (sim == null || !sim.ContainsFocus) { ActiveControl = null; Focus(); } };
         }
+
+        Point lastMouse = new Point(-1, -1);
+        readonly Timer cursorTimer = new Timer { Interval = 2000 };
+        bool cursorHidden;
+
+        void ShowCursor()
+        {
+            if (cursorHidden) { Cursor.Show(); cursorHidden = false; }
+            cursorTimer.Stop(); cursorTimer.Start();
+        }
+
+        protected override void OnDeactivate(EventArgs e)
+        {
+            base.OnDeactivate(e);
+            if (cursorHidden) { Cursor.Show(); cursorHidden = false; }
+        }
+
+        static string MouseName(MouseButtons b) =>
+            b == MouseButtons.Left ? "MBTN_LEFT" : b == MouseButtons.Right ? "MBTN_RIGHT" : b == MouseButtons.Middle ? "MBTN_MID" : null;
+
 
         public SimPanel Sim => sim;
 
