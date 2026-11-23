@@ -78,6 +78,7 @@ namespace TimeshiftViewer
         public string DetectedEncoder = "";
         public int Volume = 100;
         public int PenAutoClear = 1;          // 1: ライブに戻ったらペンの書き込みを消す
+        public int Analyze = 1;               // 1: 対戦を自動で検知する
 
         public static AppSettings Load()
         {

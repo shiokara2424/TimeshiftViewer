@@ -396,6 +396,65 @@ local function draw_strokes(ev)
   end
 end
 
+-- ------------------------------------------------------------
+--  対戦の区切り（TimeshiftViewer 本体が映像から検知して送ってくる）
+-- ------------------------------------------------------------
+local utils = require 'mp.utils'
+local matches = {}
+mp.register_script_message('ts-matches', function(json)
+  local ok, v = pcall(utils.parse_json, json)
+  if ok and type(v) == 'table' then matches = v end
+end)
+
+local function ass_safe(s) return (tostring(s or ''):gsub('[{}\\]', '')) end
+
+local function match_label(m)
+  local n1, n2 = ass_safe(m.n1), ass_safe(m.n2)
+  local s = string.format('第%d戦  %s', m.id, n1)
+  if (m.w1 or -1) >= 0 then s = s .. string.format('  %d - %d  ', m.w1, m.w2) else s = s .. '  vs  ' end
+  s = s .. n2
+  if (m.set1 or -1) >= 0 then s = s .. string.format('   Set %d-%d', m.set1, m.set2) end
+  if (m.e or -1) < 0 then s = s .. '   （対戦中）'
+  elseif m.win == 0 then s = s .. '   → ' .. n1 .. ' の勝ち'
+  elseif m.win == 1 then s = s .. '   → ' .. n2 .. ' の勝ち' end
+  return s
+end
+
+function draw_matches(ev, L, s, e, pos)
+  if #matches == 0 then return end
+  local x1, x2, y = L.bar_x1, L.bar_x2, L.bar_y
+  local span = math.max(0.001, e - s)
+  local function X(t) return x1 + (x2 - x1) * math.min(1, math.max(0, (t - s) / span)) end
+  -- マウスがシークバーの上にあれば、その位置の試合を表示する
+  local mpos = mp.get_property_native('mouse-pos')
+  local ht = nil
+  if mpos and math.abs(mpos.y - y) <= 18 and mpos.x >= x1 and mpos.x <= x2 then
+    ht = s + span * (mpos.x - x1) / (x2 - x1)
+  end
+  local cur, hov = nil, nil
+  for _, m in ipairs(matches) do
+    local ms = m.s or 0
+    local me = ((m.e or -1) >= 0) and m.e or e
+    if me >= s and ms <= e then
+      local a, b = X(ms), X(me)
+      local col = (m.id % 2 == 0) and '40B0F0' or 'F0C040'     -- BGR（橙 / 水色）
+      ev[#ev + 1] = rect(a, y + 6, math.max(a + 3, b), y + 12, col, '10')
+      ev[#ev + 1] = rect(a - 1, y - 12, a + 1, y + 12, 'FFFFFF', '30')
+    end
+    if pos >= ms and pos <= me then cur = m end
+    if ht and ht >= ms and ht <= me then hov = m end
+  end
+  local show = hov or cur
+  if show then
+    ev[#ev + 1] = string.format('{\\an1\\pos(%d,%d)\\fs21\\bord3\\shad0\\1c&HFFFFFF&\\3c&H000000&}%s',
+      x1, y - 16, match_label(show))
+    if show.tsumo and show.tsumo ~= '' then
+      ev[#ev + 1] = string.format('{\\an3\\pos(%d,%d)\\fs17\\bord3\\shad0\\1c&HC8C8C8&\\3c&H000000&}ツモ %s（%d手読取）',
+        x2, y - 16, ass_safe(show.tsumo), show.hands or 0)
+    end
+  end
+end
+
 local function draw()
   local L = layout()
   if not L then return end
@@ -455,6 +514,7 @@ local function draw()
       ev[#ev + 1] = rect(0, L.panel_y, w, h, '000000', '40')
       ev[#ev + 1] = rect(x1, y - 3, x2, y + 3, 'FFFFFF', 'A0')
       ev[#ev + 1] = rect(x1, y - 3, fx, y + 3, live and '4A3BFF' or 'DF6C2D', '00')
+      draw_matches(ev, L, s, e, pos)
       ev[#ev + 1] = rect(fx - 4, y - 10, fx + 4, y + 10, 'FFFFFF', '00')
       local label = (live and not paused) and ('LIVE  /  ' .. fmt(span)) or (fmt(-behind, true) .. '  /  ' .. fmt(span))
       ev[#ev + 1] = string.format('{\\an6\\pos(%d,%d)\\fs24\\bord0\\shad0\\1c&HFFFFFF&}%s', w - 24, y, label)

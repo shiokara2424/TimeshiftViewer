@@ -16,5 +16,12 @@
     <Compile Include="..\Puyo\Tsumo.cs" Link="Puyo\Tsumo.cs" />
     <Compile Include="..\Puyo\Field.cs" Link="Puyo\Field.cs" />
     <Compile Include="..\Puyo\SimState.cs" Link="Puyo\SimState.cs" />
+    <Compile Include="..\Puyo\Recognizer.cs" Link="Puyo\Recognizer.cs" />
+    <Compile Include="..\Puyo\DigitTemplates.cs" Link="Puyo\DigitTemplates.cs" />
+    <Compile Include="..\Puyo\DigitTemplates.Data.cs" Link="Puyo\DigitTemplates.Data.cs" />
+    <Reference Include="System.Drawing" />
+    <Compile Include="..\Puyo\NameOcr.cs" Link="Puyo\NameOcr.cs" />
+    <Compile Include="..\Analyzer.cs" Link="Analyzer.cs" />
+    <PackageReference Include="Microsoft.Windows.SDK.Contracts" Version="10.0.19041.1" />
   </ItemGroup>
 </Project>

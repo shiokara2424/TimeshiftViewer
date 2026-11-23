@@ -18,14 +18,34 @@ namespace PuyoTests
 
         static string Letters(byte[] s) => new string(s.Select(c => PuyoColor.Letters[c]).ToArray());
 
-        static int Main()
+        static int Main(string[] args)
         {
             Console.OutputEncoding = System.Text.Encoding.UTF8;
+            // 開発用: --make-templates <samples> <出力.cs> / --recog <画像...>
+            if (args.Length >= 3 && args[0] == "--make-templates") { RecogTool.MakeTemplates(args[1], args[2]); return 0; }
+            if (args.Length >= 2 && args[0] == "--recog") { foreach (var p in args.Skip(1)) RecogTool.Dump(p); return 0; }
+            if (args.Length >= 6 && args[0] == "--px")   // --px 画像 x1 y1 x2 y2 : 範囲の画素の HSV の分布
+            {
+                var f = FrameImage.Load(args[1]);
+                var r = args.Skip(2).Take(4).Select(float.Parse).ToArray();
+                var hues = new Dictionary<int, int>();
+                foreach (var p in f.Pixels(r[0], r[1], r[2], r[3]))
+                {
+                    FrameImage.Hsv(p.r, p.g, p.b, out float h, out float s, out float v);
+                    if (s < 0.3f || v < 0.5f) continue;
+                    int k = (int)(h / 10) * 10;
+                    hues.TryGetValue(k, out int c); hues[k] = c + 1;
+                }
+                foreach (var kv in hues.OrderBy(k => k.Key)) Console.WriteLine($"  hue {kv.Key,3}: {kv.Value}");
+                return 0;
+            }
             TsumoGeneration();
             TsumoProperties();
             Identification();
             FieldChains();
             SimTree();
+            Recognition();
+            MatchDetection();
             Console.WriteLine($"\n{passed} passed, {failed} failed");
             return failed == 0 ? 0 : 1;
         }
@@ -198,6 +218,124 @@ namespace PuyoTests
 
             // 19連鎖以上でもボーナス表の外に出ない
             Check(new Field().Settle().Chains == 0, "空の盤面");
+        }
+
+        // ---------------- 画像認識（samples/） ----------------
+        static string SamplesDir()
+        {
+            for (var d = new System.IO.DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory); d != null; d = d.Parent)
+            {
+                var p = System.IO.Path.Combine(d.FullName, "samples");
+                if (System.IO.Directory.Exists(p)) return p;
+            }
+            return null;
+        }
+
+        static void Recognition()
+        {
+            Console.WriteLine("[画像認識]");
+            var dir = SamplesDir();
+            if (dir == null) { Check(false, "samples/ が見つからない"); return; }
+            FrameImage F(string n) => FrameImage.Load(System.IO.Path.Combine(dir, n));
+            string P((byte axis, byte child)? p) => p == null ? "??" : $"{".RGBYPO"[p.Value.axis]}{".RGBYPO"[p.Value.child]}";
+
+            var cases = new (string file, string wins, string n1p, string n2p, string n1q, string n2q, bool go)[]
+            {
+                ("start_go_stars.jpg",     "★ 0-1",               "BB", "BP", "BB", "BP", true),
+                ("end_1p_lose_stars.jpg",  "★ 0-1",               "YB", "BP", "YB", "BP", false),
+                ("play_stars_a.jpg",       "★ 0-0",               "YY", "RP", "RY", "PG", false),
+                ("play_stars_b.jpg",       "★ 0-0",               "PR", "BP", "RY", "RP", false),
+                ("play_numbers_sets.jpg",  "数字 0-0 Set 0-0",    "BR", "BG", "BR", "BG", false),
+                ("play_numbers_chain.jpg", "数字 0-1",            "RB", "YR", "RP", "PY", false),
+                ("play_numbers_sets_video.jpg", "数字 0-0 Set 0-0", "BR", "BG", "BR", "BG", false),
+            };
+            // 解析用の切り出し映像（AnalysisCrop）でも同じに読めること
+            FrameImage Half(string n) => F(n).Crop(PuyoLayout.AnalysisCrop);
+            foreach (var c in cases.Select(x => (x, half: false)).Concat(cases.Select(x => (x, half: true))).Select(t => (t.x, t.half)))
+            {
+                var f = c.half ? Half(c.x.file) : F(c.x.file);
+                var c0 = c; var cc = c.x;
+                string tag = c.half ? " [切り出し]" : "";
+                Check(Recognizer.ReadWins(f).ToString() == cc.wins, $"{cc.file}{tag} 勝利数 {cc.wins}", Recognizer.ReadWins(f).ToString());
+                var a2 = Recognizer.ReadNext(f, 0); var b2 = Recognizer.ReadNext(f, 1);
+                string got2 = $"{P(a2.next1)} {P(a2.next2)} {P(b2.next1)} {P(b2.next2)}";
+                Check(got2 == $"{cc.n1p} {cc.n2p} {cc.n1q} {cc.n2q}", $"{cc.file}{tag} NEXT", got2);
+                Check(Recognizer.IsGo(f) == cc.go, $"{cc.file}{tag} ゴー判定 {cc.go}", Recognizer.GoRatio(f).ToString("P1"));
+            }
+            foreach (var c in new (string file, string wins, string n1p, string n2p, string n1q, string n2q, bool go)[0])
+            {
+                var f = F(c.file);
+                Check(Recognizer.ReadWins(f).ToString() == c.wins, $"{c.file} 勝利数 {c.wins}", Recognizer.ReadWins(f).ToString());
+                var a = Recognizer.ReadNext(f, 0); var b = Recognizer.ReadNext(f, 1);
+                string got = $"{P(a.next1)} {P(a.next2)} {P(b.next1)} {P(b.next2)}";
+                Check(got == $"{c.n1p} {c.n2p} {c.n1q} {c.n2q}", $"{c.file} NEXT", got);
+                Check(Recognizer.IsGo(f) == c.go, $"{c.file} ゴー判定 {c.go}", Recognizer.GoRatio(f).ToString("P1"));
+            }
+            // 盤面（下の数段だけ。上の方は演出で崩れることがある）
+            var fa = Recognizer.ReadField(F("play_stars_a.jpg"), 0);
+            var rows = fa.ToString().Split('\n');
+            Check(rows[rows.Length - 1] == "RRPPYG" && rows[rows.Length - 2] == "GYPOYO" && rows[rows.Length - 3] == "GYY.Y.",
+                "play_stars_a 1P 盤面の下3段", string.Join("|", rows.Skip(Math.Max(0, rows.Length - 3))));
+            var fs = Recognizer.ReadField(F("play_numbers_sets.jpg"), 1);
+            Check(fs.ToString() == "R.....\nG.BBYR\nGRRYBY\nBBBYBY", "play_numbers_sets 2P 盤面", fs.ToString().Replace("\n", "|"));
+            // 名前（Windows の文字認識。使えない環境では飛ばす）
+            if (NameOcr.Available)
+            {
+                foreach (var n in new[] { "start_go_stars.jpg", "play_numbers_sets.jpg" })
+                {
+                    var img = F(n).Crop(PuyoLayout.AnalysisCrop);
+                    string a = NameOcr.ReadName(img, 0).Result, b = NameOcr.ReadName(img, 1).Result;
+                    // 「1」と「I」は区別しきれないので COMI も可
+                    Check(a == "shiokara" && (b == "COM1" || b == "COMI"), $"{n} 名前 shiokara / COM1", $"{a} / {b}");
+                }
+            }
+            else Console.WriteLine("  （文字認識が使えないため名前のテストは省略）");
+            // 実際の解析用の映像（ffmpeg が切り出した 1520×880）
+            {
+                var raw = F("analysis_frame_sets.png");
+                var crop = PuyoLayout.AnalysisCrop;
+                var af = new FrameImage(raw.Px, raw.W, raw.H, raw.Stride, crop.X, crop.Y, 1f);
+                Check(Recognizer.ReadWins(af).ToString() == "数字 0-0 Set 0-0", "解析用の映像 勝利数とセット数", Recognizer.ReadWins(af).ToString());
+            }
+            var go = F("start_go_stars.jpg");
+            Check(Recognizer.ReadField(go, 0).IsEmpty && Recognizer.ReadField(go, 1).IsEmpty, "ゴーの画面は盤面が空");
+        }
+
+        // ---------------- 対戦の検知（画像の並びを流す） ----------------
+        static void MatchDetection()
+        {
+            Console.WriteLine("[対戦の検知]");
+            var dir = SamplesDir();
+            if (dir == null) return;
+            FrameImage C(string n) => FrameImage.Load(System.IO.Path.Combine(dir, n)).Crop(PuyoLayout.AnalysisCrop);
+            var go = C("synthetic_go_numbers.jpg");
+            var play = C("play_numbers_sets.jpg");
+            var won = C("play_numbers_chain.jpg");      // 2P の勝利数が 1 になった画面
+            var menu = C("menu.jpg");
+
+            var a = new TimeshiftViewer.MatchAnalyzer();
+            double t = 0;
+            void Feed(FrameImage f, int n) { for (int i = 0; i < n; i++) { a.Process(f, t); t += 0.1; } }
+            Feed(menu, 10);
+            Feed(go, 5);
+            Feed(play, 40);
+            Feed(won, 10);
+            Feed(menu, 20);
+            Check(a.Matches.Count == 1, "1試合を検知", a.Matches.Count.ToString());
+            if (a.Matches.Count == 1)
+            {
+                var m = a.Matches[0];
+                Check(Math.Abs(m.Start - 1.0) < 0.15, "開始時刻（ゴー）", m.Start.ToString("F2"));
+                Check(m.End > 5.4 && m.End < 5.8, "終了時刻（勝利数が増えて3枚後）", m.End.ToString("F2"));
+                Check(m.Winner == 1, "勝者は 2P", m.Winner.ToString());
+                Check(m.WinsStart[0] == 0 && m.WinsStart[1] == 0, "開始時の勝利数 0-0");
+                Check(m.Sets[0] == 0 && m.Sets[1] == 0, "セット数 0-0", $"{m.Sets[0]}-{m.Sets[1]}");
+                Check(m.Seq.Count >= 2 && m.Tsumo != null, "NEXT からツモを読んで仮決め",
+                    $"手数={m.Seq.Count} 候補={m.Tsumo?.Candidates}");
+            }
+            // 続けて次の試合（終了なしでゴーが来たら前の試合を閉じる）
+            Feed(go, 5); Feed(play, 20); Feed(go, 5);
+            Check(a.Matches.Count == 2 || a.Matches.Count == 3, "次のゴーで新しい試合", a.Matches.Count.ToString());
         }
 
         // ---------------- 履歴（分岐） ----------------

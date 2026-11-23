@@ -28,6 +28,7 @@
     <Reference Include="System.IO.Compression.FileSystem" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Web.Extensions" />
+    <PackageReference Include="Microsoft.Windows.SDK.Contracts" Version="10.0.19041.1" />
     <EmbeddedResource Include="mpvconf\mpv.conf" LogicalName="mpv.conf" />
     <EmbeddedResource Include="mpvconf\input.conf" LogicalName="input.conf" />
     <EmbeddedResource Include="mpvconf\timeshift.lua" LogicalName="timeshift.lua" />

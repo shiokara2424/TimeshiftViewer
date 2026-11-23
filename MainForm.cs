@@ -26,7 +26,7 @@ namespace TimeshiftViewer
         readonly AppSettings cfg = AppSettings.Load();
         ComboBox cbVideo, cbAudio, cbRes, cbFps, cbQual, cbMin, cbEnc;
         Label lblEst, lblStatus;
-        CheckBox chkPenClear;
+        CheckBox chkPenClear, chkAnalyze;
         ProgressBar progress;
         Button btnStart, btnRefresh;
         bool busy;
@@ -75,6 +75,8 @@ namespace TimeshiftViewer
 
             chkPenClear = new CheckBox { Text = "ライブに戻ったらペンの書き込みを消す", AutoSize = true, Checked = cfg.PenAutoClear != 0, Margin = new Padding(0, 10, 0, 0) };
             root.Controls.Add(chkPenClear);
+            chkAnalyze = new CheckBox { Text = "対戦を自動で検知してシークバーに表示する（ぷよぷよeスポーツ）", AutoSize = true, Checked = cfg.Analyze != 0, Margin = new Padding(0, 4, 0, 0) };
+            root.Controls.Add(chkAnalyze);
 
             var help = new Label
             {
@@ -171,7 +173,7 @@ namespace TimeshiftViewer
         void SetBusy(bool on, string status, int percent = -1)
         {
             busy = on;
-            foreach (Control c in new Control[] { cbVideo, cbAudio, cbRes, cbFps, cbQual, cbMin, cbEnc, chkPenClear, btnStart, btnRefresh }) c.Enabled = !on;
+            foreach (Control c in new Control[] { cbVideo, cbAudio, cbRes, cbFps, cbQual, cbMin, cbEnc, chkPenClear, chkAnalyze, btnStart, btnRefresh }) c.Enabled = !on;
             progress.Visible = on;
             if (percent >= 0) { progress.Style = ProgressBarStyle.Continuous; progress.Value = Math.Min(100, percent); }
             else progress.Style = ProgressBarStyle.Marquee;
@@ -218,6 +220,7 @@ namespace TimeshiftViewer
             cfg.Resolution = Val<string>(cbRes); cfg.Fps = Val<string>(cbFps);
             cfg.Kbps = Val<int>(cbQual); cfg.Minutes = Val<int>(cbMin); cfg.Encoder = Val<string>(cbEnc);
             cfg.PenAutoClear = chkPenClear.Checked ? 1 : 0;
+            cfg.Analyze = chkAnalyze.Checked ? 1 : 0;
             cfg.Save();
 
             try
@@ -280,7 +283,7 @@ namespace TimeshiftViewer
                 var player = new PlayerForm();
                 player.Show();
                 string failLog;
-                try { failLog = await RunPlayer(ffArgs, mpvArgs, player); }
+                try { failLog = await new PlayerSession(player, cfg.Analyze != 0).Run(ffArgs, mpvArgs); }
                 finally { player.AllowClose = true; player.Close(); }
                 Show(); Activate();
                 SetBusy(false, "");
@@ -294,56 +297,6 @@ namespace TimeshiftViewer
             }
         }
 
-        // ffmpeg の出力を mpv に流し込み、mpv が閉じるまで待つ。ffmpeg が先に落ちたらそのログを返す
-        static async Task<string> RunPlayer(string ffArgs, string mpvArgs, PlayerForm player)
-        {
-            var log = new StringBuilder();
-            var logFile = new StreamWriter(Paths.Log, false, new UTF8Encoding(false)) { AutoFlush = true };
-            logFile.WriteLine($"[{DateTime.Now}] ffmpeg {ffArgs}");
-
-            // mpv はプレーヤーのウィンドウに埋め込む（--wid）。IPC で script-message や全画面の切り替えを受け取る
-            string pipe = "tsv-" + Process.GetCurrentProcess().Id + "-" + Environment.TickCount;
-            mpvArgs = $"--input-ipc-server=\\\\.\\pipe\\{pipe} --wid={player.VideoHost.Handle.ToInt64()} " +
-                      (Environment.GetEnvironmentVariable("TSV_MPV_EXTRA") ?? "") + " " + mpvArgs;   // 開発用: --log-file= など
-
-            var mp = Process.Start(new ProcessStartInfo(Paths.Mpv, mpvArgs)
-            { UseShellExecute = false, RedirectStandardInput = true, WorkingDirectory = Paths.Base });
-            var ipc = await Task.Run(() => MpvIpc.Connect(pipe, mp));
-            if (ipc != null) player.Attach(ipc);
-            var ff = new Process
-            {
-                StartInfo = new ProcessStartInfo(Paths.Ffmpeg, ffArgs)
-                {
-                    UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true,
-                    RedirectStandardError = true, StandardErrorEncoding = Encoding.UTF8, WorkingDirectory = Paths.Base,
-                }
-            };
-            ff.ErrorDataReceived += (s, e) =>
-            {
-                if (e.Data == null) return;
-                lock (log) { log.AppendLine(e.Data); if (log.Length > 20000) log.Remove(0, 10000); }
-                try { lock (logFile) logFile.WriteLine(e.Data); } catch { }
-            };
-            ff.Start();
-            ff.BeginErrorReadLine();
-
-            var copy = Task.Run(async () =>
-            {
-                try { await ff.StandardOutput.BaseStream.CopyToAsync(mp.StandardInput.BaseStream, 65536); } catch { }
-                try { mp.StandardInput.Close(); } catch { }   // ffmpeg が止まったら mpv に終端を伝える
-            });
-
-            // mpv が閉じるまで待つ（ffmpeg が先に止まった場合、mpv は受信済みの分を再生し終えると閉じる）
-            await Task.Run(() => mp.WaitForExit());
-            // mpv を閉じても ffmpeg は自分からは終了しない（出力が詰まるだけ）ので、終了済みなら異常停止
-            bool ffDiedFirst = ff.HasExited;
-            if (!ff.HasExited) { try { ff.Kill(); } catch { } }
-            try { ff.WaitForExit(3000); } catch { }
-            try { lock (logFile) logFile.Dispose(); } catch { }
-            ipc?.Dispose();
-            if (ffDiedFirst) { lock (log) return log.ToString(); }
-            return null;
-        }
     }
 
     static class Program

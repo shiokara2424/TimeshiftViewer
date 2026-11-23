@@ -21,6 +21,9 @@ namespace TimeshiftViewer
         FormWindowState prevState = FormWindowState.Maximized;
         public bool AllowClose;
         public event Action<string, string[]> PlayerMessage;   // UI スレッドで呼ぶ
+        public event Action<int> LoadRequested;                // 画面の盤面をシミュレーターに読み込む（0=1P 1=2P）
+        int loadSide;
+        bool simShown;
 
         const int BottomReserve = 130;    // mpv の操作パネル（timeshift.lua の PANEL_H）を隠さない
 
@@ -76,16 +79,28 @@ namespace TimeshiftViewer
             if (sim == null)
             {
                 sim = new SimPanel();
+                sim.AddToolButton("画面から読み込む", (s, e) => LoadRequested?.Invoke(loadSide));
+                Button sideBtn = null;
+                sideBtn = sim.AddToolButton("読む盤面: 1P", (s, e) =>
+                {
+                    loadSide = 1 - loadSide;
+                    sideBtn.Text = "読む盤面: " + (loadSide == 0 ? "1P" : "2P");
+                    LoadRequested?.Invoke(loadSide);
+                });
                 sim.AddToolButton("左右を入れ替え", (s, e) => { simRight = !simRight; LayoutSim(); });
                 sim.AddToolButton("閉じる（T）", (s, e) => HideSim());
                 Controls.Add(sim);
                 // DPI の自動スケーリングでサイズが変わったら置き直す
                 sim.SizeChanged += (s, e) => { if (!laying) BeginInvoke((Action)LayoutSim); };
             }
+            bool wasHidden = !simShown;
+            simShown = true;
             sim.Visible = true;
             sim.BringToFront();
             LayoutSim();
             BeginInvoke((Action)LayoutSim);
+            // 開いたときに今の画面の盤面を読み込む
+            if (wasHidden) LoadRequested?.Invoke(loadSide);
             sim.Focus();
             sim.SelectNextControl(sim, true, true, true, true);
             return sim;
@@ -94,6 +109,7 @@ namespace TimeshiftViewer
         void HideSim()
         {
             if (sim == null) return;
+            simShown = false;
             sim.Visible = false;
             VideoHost.Focus();
         }
