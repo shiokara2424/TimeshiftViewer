@@ -47,18 +47,7 @@ namespace TimeshiftViewer
             {
                 if (e.Location == lastMouse) return;
                 lastMouse = e.Location;
-                ShowCursor();
                 ipc?.Send("mouse", e.X, e.Y);
-            };
-            VideoHost.MouseLeave += (s, e) => ShowCursor();
-            // 映像の上でしばらくマウスを動かさなければカーソルを隠す（配信に映らないように。mpv の cursor-autohide の代わり）
-            cursorTimer.Tick += (s, e) =>
-            {
-                cursorTimer.Stop();
-                if (!cursorHidden && VideoHost.ClientRectangle.Contains(VideoHost.PointToClient(Cursor.Position)) && ContainsFocus)
-                {
-                    Cursor.Hide(); cursorHidden = true;
-                }
             };
             VideoHost.MouseDown += (s, e) =>
             {
@@ -88,20 +77,6 @@ namespace TimeshiftViewer
         }
 
         Point lastMouse = new Point(-1, -1);
-        readonly Timer cursorTimer = new Timer { Interval = 2000 };
-        bool cursorHidden;
-
-        void ShowCursor()
-        {
-            if (cursorHidden) { Cursor.Show(); cursorHidden = false; }
-            cursorTimer.Stop(); cursorTimer.Start();
-        }
-
-        protected override void OnDeactivate(EventArgs e)
-        {
-            base.OnDeactivate(e);
-            if (cursorHidden) { Cursor.Show(); cursorHidden = false; }
-        }
 
         static string MouseName(MouseButtons b) =>
             b == MouseButtons.Left ? "MBTN_LEFT" : b == MouseButtons.Right ? "MBTN_RIGHT" : b == MouseButtons.Middle ? "MBTN_MID" : null;

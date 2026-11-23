@@ -38,6 +38,7 @@ local PEN_COLORS = {
   { name = '黄',   c = '00E6FF' },
   { name = '水色', c = 'FFD000' },
   { name = '緑',   c = '40E040' },
+  { name = '紫',   c = 'F050B4' },
   { name = '白',   c = 'FFFFFF' },
 }
 local PEN_WIDTH = 0.0065      -- 線の太さ（映像の高さに対する割合）
@@ -232,8 +233,7 @@ local function layout()
   L.bar_x1, L.bar_x2, L.bar_y = 30, w - 230, h - 88
   -- ボタン行
   local defs = {
-    { label = 'pen',   w = 64, act = function() pen_set(not pen.on) end, gap = 0 },
-    { label = '« 10s', w = 84, act = function() ts_seek(-10) end, gap = 28 },
+    { label = '« 10s', w = 84, act = function() ts_seek(-10) end },
     { label = '« 5s',  w = 76, act = function() ts_seek(-5) end },
     { label = 'play',  w = 64, act = toggle_pause },
     { label = '5s »',  w = 76, act = function() ts_seek(5) end },
@@ -251,9 +251,13 @@ local function layout()
     d.x1, d.y1, d.x2, d.y2 = x, y1, x + d.w, y1 + bh
     x = d.x2
   end
+  -- ペンのボタンは左端（パレットをその真上に出す。盤面に重ならない位置）
+  local penb = { label = 'pen', w = 64, act = function() pen_set(not pen.on) end }
+  penb.x1, penb.y1, penb.x2, penb.y2 = 30, y1, 30 + penb.w, y1 + bh
+  table.insert(defs, 1, penb)
   L.buttons = defs
 
-  -- ペンのパレット（ペンモード中だけ。画面右端に縦に並べる）
+  -- ペンのパレット（ペンモード中だけ。ペンのボタンの真上に縦に並べる）
   if pen.on then
     local items = {}
     for i = 1, #PEN_COLORS do items[#items + 1] = { kind = 'color', n = i, act = function() pen.color = i end } end
@@ -263,9 +267,8 @@ local function layout()
     local pw, ph, pg = 76, 46, 8
     local tot = 0
     for i, it in ipairs(items) do tot = tot + ph + (i > 1 and (it.gap or pg) or 0) end
-    local px = w - pw - 16
-    local py = math.floor((h - tot) / 2)
-    if py + tot > L.panel_y - 16 then py = math.max(40, L.panel_y - 16 - tot) end   -- 操作パネルに重ねない
+    local px = math.max(8, penb.x1 + math.floor((penb.w - pw) / 2))
+    local py = math.max(40, L.panel_y - 14 - tot)   -- 操作パネル（シークバー）のすぐ上から上へ積む
     for i, it in ipairs(items) do
       if i > 1 then py = py + (it.gap or pg) end
       it.x1, it.y1, it.x2, it.y2 = px, py, px + pw, py + ph

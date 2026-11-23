@@ -27,6 +27,7 @@ namespace TimeshiftViewer
         public TsumoSource Tsumo;                      // 識別結果（候補が複数なら無作為に選んだもの）
         public bool Swapped;                           // 軸と子を入れ替えたほうが一致した
         public string TsumoKey = "";                   // 識別に使った並び（変わったら識別し直す）
+        public bool NamesReread;                       // 試合中にもう一度名前を読んだ
 
         /// <summary>時刻 t に操作中の組ぷよが何手目か（0始まり）</summary>
         public int HandIndexAt(int side, double t)
@@ -100,6 +101,9 @@ namespace TimeshiftViewer
             if (wins.Valid) lastWins = wins;
             if (cur == null) return;
 
+            // 名前は試合ごとに読む。ゴーの瞬間は画面が暗いことがあるので、5秒後にもう一度読んで上書きする
+            if (!cur.NamesReread && t - cur.Start > 5) { cur.NamesReread = true; ReadNamesAsync(f, cur, true); }
+
             // ---- 終了: 勝利数が増えた ----
             if (wins.Valid && cur.WinsStart[0] >= 0 && t - cur.Start > 3)
             {
@@ -148,7 +152,7 @@ namespace TimeshiftViewer
             Changed?.Invoke();
         }
 
-        void ReadNamesAsync(FrameImage f, MatchInfo m)
+        void ReadNamesAsync(FrameImage f, MatchInfo m, bool reread = false)
         {
             if (NameReader == null) return;
             var reader = NameReader;
@@ -158,9 +162,13 @@ namespace TimeshiftViewer
             {
                 try
                 {
-                    // 前の試合と同じ名前なら OCR の揺れを避けるため引き継ぐ
                     var prev = Matches.LastOrDefault(x => x != m && x.Names[0] != null);
-                    for (int side = 0; side < 2; side++) m.Names[side] = reader(f, side) ?? prev?.Names[side];
+                    for (int side = 0; side < 2; side++)
+                    {
+                        string n = reader(f, side);
+                        if (n != null) m.Names[side] = n;                         // 読めたら毎回その試合の名前にする
+                        else if (!reread && m.Names[side] == null) m.Names[side] = prev?.Names[side];   // 読めなければ前の試合の名前を仮に使う
+                    }
                     Changed?.Invoke();
                 }
                 catch { }
